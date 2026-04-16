@@ -1,0 +1,7 @@
+text,label
+"Urgent: Your account will be suspended unless you verify now",phishing
+"Meeting moved to 3 PM, see calendar invite",legitimate
+"Security alert: Click here to confirm your password",phishing
+"Here is the monthly finance report attachment",legitimate
+"You won a gift card, claim your prize today",phishing
+"Can we reschedule our standup for tomorrow?",legitimate
