@@ -16,6 +16,15 @@ except ModuleNotFoundError:
         preprocessing,
     )
 
+# Phishing kararı için minimum eşik — 60 ve üzeri phishing kabul edilir.
+# 50 çok düşüktü: model belirsiz olduğunda bile YES diyordu (false positive).
+PHISHING_THRESHOLD = 60.0
+
+# Keyword skorunun nihai risk skoru üzerindeki maksimum etkisi.
+# Model olasılığı %65, keyword skoru %35 ağırlıkla birleştirilir.
+KEYWORD_WEIGHT = 0.35
+MODEL_WEIGHT = 1.0 - KEYWORD_WEIGHT
+
 
 def is_phishing_label(label: object) -> bool:
     """Model çıktısını YES veya NO olarak yorumlamak için etiketi kontrol eder."""
@@ -33,7 +42,6 @@ def load_model_objects() -> tuple[object, object]:
             f"Model bulunamadi: {model_path}. Once src/train_model.py dosyasini calistirin."
         )
 
-    # Kaydedilen model ve TF-IDF vectorizer nesnelerini yükle.
     with open(model_path, "rb") as file:
         saved_objects = pickle.load(file)
 
@@ -41,26 +49,35 @@ def load_model_objects() -> tuple[object, object]:
 
 
 def predict_details(text: str) -> dict:
-    """Metni isler ve modelden detayli tahmin bilgilerini dondurur."""
+    """Metni işler ve modelden detaylı tahmin bilgilerini döndürür."""
     model, vectorizer = load_model_objects()
 
     clean_text = preprocessing(text)
     text_vector = vectorizer.transform([clean_text])
-    prediction = model.predict(text_vector)[0]
 
     if hasattr(model, "predict_proba"):
         probabilities = model.predict_proba(text_vector)[0]
         phishing_probability = float(probabilities[1] * 100)
         normal_probability = float(probabilities[0] * 100)
     else:
-        phishing_probability = 0.0
-        normal_probability = 0.0
+        # predict_proba yoksa ham tahmine göre basit atama yap.
+        raw_pred = model.predict(text_vector)[0]
+        phishing_probability = 100.0 if is_phishing_label(raw_pred) else 0.0
+        normal_probability = 100.0 - phishing_probability
 
     matched_keywords = find_suspicious_keywords(text)
     keyword_score = get_keyword_score(matched_keywords)
-    risk_score = max(phishing_probability, (phishing_probability * 0.5) + (keyword_score * 0.5))
-    phishing_result = "YES" if risk_score >= 50 else "NO"
-    confidence = abs(risk_score - 50.0) * 2.0
+
+    # Risk skoru: model olasılığı baskın, keyword skoru destekleyici rol oynar.
+    # Keyword skoru yalnızca model zaten şüpheleniyorsa etkisini artırır;
+    # model güvenliyse keyword skoru kararı tersine çeviremez.
+    risk_score = (MODEL_WEIGHT * phishing_probability) + (KEYWORD_WEIGHT * keyword_score)
+
+    phishing_result = "YES" if risk_score >= PHISHING_THRESHOLD else "NO"
+
+    # Confidence: eşikten ne kadar uzakta olduğumuzu 0–100 aralığına normalize et.
+    raw_distance = abs(risk_score - PHISHING_THRESHOLD)
+    confidence = min(100.0, raw_distance * (100.0 / PHISHING_THRESHOLD))
 
     return {
         "label": phishing_result,
@@ -85,7 +102,7 @@ def predict_email(text: str) -> str:
 
 
 def main() -> None:
-    """Iki farkli test e-postasi icin tahmin yapar ve sonuclari ekrana yazdirir."""
+    """İki farklı test e-postası için tahmin yapar ve sonuçları ekrana yazdırır."""
     test_email_1 = {
         "subject": "Verify Your Bank Account",
         "body": "Your account has been suspended. Click here to verify immediately.",
@@ -103,16 +120,16 @@ def main() -> None:
 
     print("Test 1")
     print(f"Subject: {test_email_1['subject']}")
-    print(f"Body: {test_email_1['body']}")
-    print(f"Phishing: {result_1['label']}")
+    print(f"Body   : {test_email_1['body']}")
+    print(f"Phishing : {result_1['label']}")
     print(f"Confidence: %{result_1['confidence']:.2f}")
     print(f"Risk Score: {result_1['risk_score']:.2f}")
     print()
 
     print("Test 2")
     print(f"Subject: {test_email_2['subject']}")
-    print(f"Body: {test_email_2['body']}")
-    print(f"Phishing: {result_2['label']}")
+    print(f"Body   : {test_email_2['body']}")
+    print(f"Phishing : {result_2['label']}")
     print(f"Confidence: %{result_2['confidence']:.2f}")
     print(f"Risk Score: {result_2['risk_score']:.2f}")
 
