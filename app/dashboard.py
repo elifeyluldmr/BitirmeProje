@@ -7,7 +7,8 @@ import pickle
 import numpy as np
 import pandas as pd
 import streamlit as st
-from sklearn.metrics import confusion_matrix, classification_report, roc_curve, auc
+import plotly.graph_objects as go
+from sklearn.metrics import confusion_matrix, roc_curve, auc, accuracy_score, precision_score, recall_score, f1_score
 from sklearn.model_selection import train_test_split
 
 from src.predict import predict_details, PHISHING_THRESHOLD
@@ -80,17 +81,6 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     font-family: 'JetBrains Mono', monospace;
     margin: 3px;
 }
-.risk-bar-container {
-    background: #313244;
-    border-radius: 999px;
-    height: 10px;
-    margin: 8px 0 4px 0;
-    overflow: hidden;
-}
-.risk-bar-fill {
-    height: 100%;
-    border-radius: 999px;
-}
 .perf-card {
     background: #1e1e2e;
     border: 1px solid #313244;
@@ -104,7 +94,6 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Sekmeler ────────────────────────────────────────────────────────────────
 tab1, tab2 = st.tabs(["🔍 E-posta Analizi", "📊 Model Performansı"])
 
 # ══════════════════════════════════════════════════════════
@@ -140,7 +129,6 @@ with tab1:
 
                 st.divider()
                 st.markdown("### Analiz Sonucu")
-
                 st.markdown(f'<div class="verdict-banner {verdict_class}">{verdict_text}</div>', unsafe_allow_html=True)
 
                 if confidence < 30:
@@ -158,19 +146,48 @@ with tab1:
                     st.markdown(f'<div class="metric-card"><div class="metric-label">Güven Skoru</div><div class="metric-value neutral">%{confidence:.1f}</div></div>', unsafe_allow_html=True)
                     st.markdown(f'<div class="metric-card"><div class="metric-label">Anahtar Kelime Skoru</div><div class="metric-value neutral">%{keyword_score:.1f}</div></div>', unsafe_allow_html=True)
 
-                bar_color = "#f38ba8" if is_phishing else "#a6e3a1"
-                st.markdown(f"""
-                <div style="margin-top:16px;">
-                    <div class="metric-label" style="margin-bottom:4px;">
-                        Risk Skoru: <strong style="color:#cdd6f4">{risk_score:.1f} / 100</strong>
-                        &nbsp;·&nbsp; Eşik: {PHISHING_THRESHOLD:.0f}
-                    </div>
-                    <div class="risk-bar-container">
-                        <div class="risk-bar-fill" style="width:{risk_score:.1f}%; background:{bar_color};"></div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+                # ── Gauge Grafik ─────────────────────────────────────────────
+                gauge_color = "#f38ba8" if is_phishing else "#a6e3a1"
+                fig_gauge = go.Figure(go.Indicator(
+                    mode="gauge+number",
+                    value=risk_score,
+                    title={"text": "Risk Skoru", "font": {"size": 16, "color": "#cdd6f4", "family": "JetBrains Mono"}},
+                    number={"font": {"size": 36, "color": gauge_color, "family": "JetBrains Mono"}, "suffix": "/100"},
+                    gauge={
+                        "axis": {
+                            "range": [0, 100],
+                            "tickcolor": "#6c7086",
+                            "tickfont": {"color": "#6c7086", "size": 11},
+                        },
+                        "bar": {"color": gauge_color, "thickness": 0.25},
+                        "bgcolor": "#1e1e2e",
+                        "bordercolor": "#313244",
+                        "steps": [
+                            {"range": [0, PHISHING_THRESHOLD], "color": "#0d2b1e"},
+                            {"range": [PHISHING_THRESHOLD, 100], "color": "#3b1219"},
+                        ],
+                        "threshold": {
+                            "line": {"color": "#f9e2af", "width": 3},
+                            "thickness": 0.75,
+                            "value": PHISHING_THRESHOLD,
+                        },
+                    }
+                ))
+                fig_gauge.update_layout(
+                    paper_bgcolor="#1e1e2e",
+                    font={"color": "#cdd6f4", "family": "JetBrains Mono"},
+                    margin={"t": 60, "b": 10, "l": 30, "r": 30},
+                    height=220,
+                )
+                st.plotly_chart(fig_gauge, use_container_width=True)
+                st.markdown(
+                    f"<div style='text-align:center; font-family:JetBrains Mono; font-size:12px; color:#6c7086;'>"
+                    f"Eşik: <strong style='color:#f9e2af'>{PHISHING_THRESHOLD:.0f}</strong> &nbsp;·&nbsp; "
+                    f"Sarı çizgiyi geçerse PHİSHİNG</div>",
+                    unsafe_allow_html=True
+                )
 
+                # ── Keyword tagları ──────────────────────────────────────────
                 st.markdown("<div style='margin-top:20px;'>", unsafe_allow_html=True)
                 if keywords:
                     st.markdown("<div class='metric-label' style='margin-bottom:6px;'>🔑 Tespit Edilen Şüpheli Kelimeler</div>", unsafe_allow_html=True)
@@ -191,7 +208,6 @@ with tab2:
     st.markdown("<p style='color:#6c7086; font-size:14px;'>Test verisi üzerinde hesaplanan metrikler ve grafikler.</p>", unsafe_allow_html=True)
     st.divider()
 
-    @st.cache_data
     def load_performance_data():
         project_root = Path(__file__).resolve().parents[1]
         model_path   = project_root / "models" / "phishing_model.pkl"
@@ -213,8 +229,8 @@ with tab2:
         _, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
         X_test_tfidf = vectorizer.transform(X_test)
-        y_pred       = model.predict(X_test_tfidf)
-        y_prob       = model.predict_proba(X_test_tfidf)[:, 1]
+        y_prob = model.predict_proba(X_test_tfidf)[:, 1]
+        y_pred = (y_prob * 100 >= PHISHING_THRESHOLD).astype(int)
 
         return y_test.values, y_pred, y_prob
 
@@ -224,7 +240,6 @@ with tab2:
         cm = confusion_matrix(y_test, y_pred)
         tn, fp, fn, tp = cm.ravel()
 
-        from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
         accuracy  = accuracy_score(y_test, y_pred)
         precision = precision_score(y_test, y_pred)
         recall    = recall_score(y_test, y_pred)
@@ -232,7 +247,7 @@ with tab2:
 
         # ── Metrik kartları ───────────────────────────────────────────────────
         c1, c2, c3, c4 = st.columns(4)
-        for col, label, value in [
+        for col, lbl, value in [
             (c1, "Accuracy",  accuracy),
             (c2, "Precision", precision),
             (c3, "Recall",    recall),
@@ -242,20 +257,16 @@ with tab2:
                 st.markdown(f"""
                 <div class="perf-card">
                     <div class="perf-value">%{value*100:.1f}</div>
-                    <div class="perf-label">{label}</div>
+                    <div class="perf-label">{lbl}</div>
                 </div>
                 """, unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # ── Confusion Matrix + ROC ────────────────────────────────────────────
         col_cm, col_roc = st.columns(2)
 
         with col_cm:
             st.markdown("### 🔲 Confusion Matrix")
-
-            import plotly.graph_objects as go
-
             fig_cm = go.Figure(data=go.Heatmap(
                 z=[[tn, fp], [fn, tp]],
                 x=["Tahmin: Normal", "Tahmin: Phishing"],
@@ -275,7 +286,6 @@ with tab2:
                 xaxis=dict(side="bottom"),
             )
             st.plotly_chart(fig_cm, use_container_width=True)
-
             st.markdown(f"""
             <div style="font-family: JetBrains Mono; font-size:13px; color:#6c7086; margin-top:8px;">
                 ✅ Doğru Normal (TN): <span style="color:#a6e3a1">{tn}</span> &nbsp;|&nbsp;
@@ -287,7 +297,6 @@ with tab2:
 
         with col_roc:
             st.markdown("### 📈 ROC Eğrisi")
-
             fpr, tpr, _ = roc_curve(y_test, y_prob)
             roc_auc = auc(fpr, tpr)
 
@@ -327,30 +336,21 @@ with tab2:
         # ── Olasılık Dağılımı ─────────────────────────────────────────────────
         st.markdown("### 🎯 Phishing Olasılığı Dağılımı")
 
-        import plotly.figure_factory as ff
-
         phish_probs  = y_prob[y_test == 1]
         normal_probs = y_prob[y_test == 0]
 
         fig_dist = go.Figure()
         fig_dist.add_trace(go.Histogram(
-            x=phish_probs,
-            name="Phishing",
-            marker_color="#f38ba8",
-            opacity=0.7,
-            nbinsx=40,
+            x=phish_probs, name="Phishing",
+            marker_color="#f38ba8", opacity=0.7, nbinsx=40,
         ))
         fig_dist.add_trace(go.Histogram(
-            x=normal_probs,
-            name="Normal",
-            marker_color="#a6e3a1",
-            opacity=0.7,
-            nbinsx=40,
+            x=normal_probs, name="Normal",
+            marker_color="#a6e3a1", opacity=0.7, nbinsx=40,
         ))
         fig_dist.add_vline(
             x=PHISHING_THRESHOLD / 100,
-            line_dash="dash",
-            line_color="#f9e2af",
+            line_dash="dash", line_color="#f9e2af",
             annotation_text=f"Eşik: {PHISHING_THRESHOLD:.0f}",
             annotation_font_color="#f9e2af",
         )

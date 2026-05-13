@@ -1,16 +1,16 @@
 SUSPICIOUS_KEYWORDS = [
-    # ── İngilizce phishing kelimeleri ────────────────────────
+    # ── İngilizce phishing kelimeleri ---
     "verify", "account", "login", "password", "urgent", "click",
-    "suspended", "bank", "confirm", "security", "update", "access",
+    "suspended",  "confirm", "security", "update", "access",
     "credential", "expire", "limited", "unauthorized", "alert",
     "immediately", "action", "required", "threat", "blocked",
     "locked", "prize", "winner", "claim", "free", "gift",
     "offer", "discount", "congratulations", "selected", "reward",
-    "invoice", "payment", "overdue", "refund", "tax", "irs",
+    "invoice", "payment", "overdue", "refund", "tax", 
     "paypal", "amazon", "apple", "microsoft", "google", "netflix",
     "unusual", "suspicious", "compromised", "hacked", "breach",
 
-    # ── Türkçe phishing kelimeleri ───────────────────────────
+    # ---Türkçe phishing kelimeleri --- 
     # Hesap & Güvenlik
     "dogrula", "doğrula", "hesap", "giris", "giriş", "sifre", "şifre",
     "acil", "tikla", "tıkla", "askiya", "askıya", "banka", "onayla",
@@ -25,7 +25,7 @@ SUSPICIOUS_KEYWORDS = [
 
     # Ödeme & Finans
     "odeme", "ödeme", "fatura", "borc", "borç", "gecikti", "vadesi",
-    "iade", "vergi", "kredi", "banka", "hesap", "transfer", "para",
+    "iade", "vergi", "kredi", "hesap", "transfer", "para",
     "odenmedi", "ödenmedi", "kapatilacak", "kapatılacak",
 
     # Kargo & Teslimat
@@ -33,7 +33,7 @@ SUSPICIOUS_KEYWORDS = [
     "güncelle", "teslim edilemedi",
 
     # Aciliyet
-    "hemen", "derhal", "ivedilikle", "son", "süre", "saat",
+    "hemen", "derhal", "ivedilikle", "son", "süre", 
     "dakika", "bekliyor", "beklemede", "kritik", "önemli",
 
     # Bağlantı & Eylem

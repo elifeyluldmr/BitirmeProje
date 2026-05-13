@@ -17,7 +17,6 @@ except ModuleNotFoundError:
     )
 
 # Phishing kararı için minimum eşik — 60 ve üzeri phishing kabul edilir.
-# 50 çok düşüktü: model belirsiz olduğunda bile YES diyordu (false positive).
 PHISHING_THRESHOLD = 60.0
 
 # Keyword skorunun nihai risk skoru üzerindeki maksimum etkisi.
