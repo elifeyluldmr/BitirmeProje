@@ -3,17 +3,17 @@ import pickle
 
 try:
     from src.text_utils import (
+        advanced_preprocessing,
         build_email_text,
         find_suspicious_keywords,
         get_keyword_score,
-        preprocessing,
     )
 except ModuleNotFoundError:
     from text_utils import (
+        advanced_preprocessing,
         build_email_text,
         find_suspicious_keywords,
         get_keyword_score,
-        preprocessing,
     )
 
 # Phishing kararı için minimum eşik — 60 ve üzeri phishing kabul edilir.
@@ -24,6 +24,8 @@ PHISHING_THRESHOLD = 60.0
 KEYWORD_WEIGHT = 0.35
 MODEL_WEIGHT = 1.0 - KEYWORD_WEIGHT
 
+_model_cache: dict = {}
+
 
 def is_phishing_label(label: object) -> bool:
     """Model çıktısını YES veya NO olarak yorumlamak için etiketi kontrol eder."""
@@ -32,9 +34,14 @@ def is_phishing_label(label: object) -> bool:
 
 
 def load_model_objects() -> tuple[object, object]:
-    """Kaydedilen model ve TF-IDF vectorizer nesnelerini yükler."""
+    """Kaydedilen model ve TF-IDF vectorizer nesnelerini yükler; sonucu önbellekte tutar."""
     project_root = Path(__file__).resolve().parents[1]
     model_path = project_root / "models" / "phishing_model.pkl"
+
+    # Dosya değiştiyse önbelleği geçersiz kıl
+    mtime = model_path.stat().st_mtime if model_path.exists() else 0
+    if "model" in _model_cache and _model_cache.get("mtime") == mtime:
+        return _model_cache["model"], _model_cache["vectorizer"]
 
     if not model_path.exists():
         raise FileNotFoundError(
@@ -44,14 +51,17 @@ def load_model_objects() -> tuple[object, object]:
     with open(model_path, "rb") as file:
         saved_objects = pickle.load(file)
 
-    return saved_objects["model"], saved_objects["vectorizer"]
+    _model_cache["model"] = saved_objects["model"]
+    _model_cache["vectorizer"] = saved_objects["vectorizer"]
+    _model_cache["mtime"] = mtime
+    return _model_cache["model"], _model_cache["vectorizer"]
 
 
 def predict_details(text: str) -> dict:
     """Metni işler ve modelden detaylı tahmin bilgilerini döndürür."""
     model, vectorizer = load_model_objects()
 
-    clean_text = preprocessing(text)
+    clean_text = advanced_preprocessing(text)
     text_vector = vectorizer.transform([clean_text])
 
     if hasattr(model, "predict_proba"):

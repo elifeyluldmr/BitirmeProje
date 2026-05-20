@@ -1,3 +1,40 @@
+import re
+
+# ── advanced_preprocessing sabitleri ─────────────────────────────────────────
+_STOPWORDS = {
+    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
+    "of", "with", "is", "are", "was", "were", "be", "been", "have", "has",
+    "had", "do", "does", "did", "will", "would", "could", "should", "may",
+    "might", "this", "that", "these", "those", "it", "its", "i", "you",
+    "he", "she", "we", "they", "my", "your", "his", "her", "our", "their",
+    "from", "not", "no", "so", "if", "as", "by", "up", "out", "about",
+    "than", "then", "there", "here", "when", "where", "who", "which", "what",
+    "all", "each", "any", "some", "more", "also", "just", "can", "us",
+    "bir", "ve", "bu", "da", "de", "ile", "için", "mi", "mı", "mu", "mü",
+    "ya", "ki", "ne", "ben", "sen", "biz", "siz", "o", "onlar", "benden",
+    "senden", "bizden", "sizden", "ama", "fakat", "ancak", "çünkü", "eğer",
+    "gibi", "kadar", "daha", "en", "çok", "az", "hiç", "her", "bazı",
+    "şu", "şey", "olan", "olarak", "var", "yok",
+}
+_URL_PATTERN   = re.compile(r"https?://\S+|www\.\S+")
+_NUMBER_PATTERN = re.compile(r"^\d+$")
+_PUNCT_PATTERN  = re.compile(r"[^\w\s]")
+
+
+def advanced_preprocessing(text: str) -> str:
+    """URL'leri token'a çevirir, stopword'leri ve kısa token'ları atar."""
+    if not isinstance(text, str):
+        return ""
+    text = _URL_PATTERN.sub(" urltoken ", text)
+    text = text.lower().strip()
+    text = _PUNCT_PATTERN.sub(" ", text)
+    tokens = [
+        t for t in text.split()
+        if len(t) > 2 and t not in _STOPWORDS and not _NUMBER_PATTERN.match(t)
+    ]
+    return " ".join(tokens)
+
+
 SUSPICIOUS_KEYWORDS = [
     # ── İngilizce phishing kelimeleri ---
     "verify", "account", "login", "password", "urgent", "click",
@@ -87,8 +124,8 @@ def find_suspicious_keywords(text: str) -> list[str]:
     matched_keywords: list[str] = []
 
     for keyword in SUSPICIOUS_KEYWORDS:
-        normalized_keyword = keyword.translate(TURKISH_CHAR_MAP)
-        if normalized_keyword in clean_text and keyword not in matched_keywords:
+        normalized_keyword = re.escape(keyword.translate(TURKISH_CHAR_MAP))
+        if re.search(rf"\b{normalized_keyword}\b", clean_text) and keyword not in matched_keywords:
             matched_keywords.append(keyword)
 
     return matched_keywords

@@ -3,7 +3,6 @@ Model Eğitim Scripti
 Çalıştır: python src/train_model.py
 """
 
-import re
 import sys
 from pathlib import Path
 
@@ -16,64 +15,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
 from sklearn.model_selection import train_test_split
 
-# ── Stopword listesi (İngilizce + Türkçe) ────────────────────────────────────
-STOPWORDS = {
-    # İngilizce yaygın kelimeler
-    "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "is", "are", "was", "were", "be", "been", "have", "has",
-    "had", "do", "does", "did", "will", "would", "could", "should", "may",
-    "might", "this", "that", "these", "those", "it", "its", "i", "you",
-    "he", "she", "we", "they", "my", "your", "his", "her", "our", "their",
-    "from", "not", "no", "so", "if", "as", "by", "up", "out", "about",
-    "than", "then", "there", "here", "when", "where", "who", "which", "what",
-    "all", "each", "any", "some", "more", "also", "just", "can", "us",
-    # Türkçe yaygın kelimeler
-    "bir", "ve", "bu", "da", "de", "ile", "için", "mi", "mı", "mu", "mü",
-    "ya", "ki", "ne", "ben", "sen", "biz", "siz", "o", "onlar", "benden",
-    "senden", "bizden", "sizden", "ama", "fakat", "ancak", "çünkü", "eğer",
-    "gibi", "kadar", "daha", "en", "çok", "az", "hiç", "her", "bazı",
-    "şu", "şey", "olan", "olan", "olarak", "olan", "var", "yok", "olan",
-}
-
-# URL pattern
-URL_PATTERN = re.compile(r"https?://\S+|www\.\S+")
-# Sadece rakam olan token'lar
-NUMBER_PATTERN = re.compile(r"^\d+$")
-# Noktalama
-PUNCT_PATTERN = re.compile(r"[^\w\s]")
-
-
-def advanced_preprocessing(text: str) -> str:
-    """
-    Gelişmiş metin temizleme:
-    - URL'leri <url> token'ına dönüştür (tamamen silme — varlığı önemli bir sinyal)
-    - Küçük harfe çevir
-    - Noktalama kaldır
-    - Çok kısa token'ları at (1-2 karakter)
-    - Stopword'leri kaldır
-    - Fazla boşlukları temizle
-    """
-    if not isinstance(text, str):
-        return ""
-
-    # URL'leri token'a dönüştür
-    text = URL_PATTERN.sub(" urltoken ", text)
-
-    # Küçük harfe çevir
-    text = text.lower().strip()
-
-    # Noktalama kaldır
-    text = PUNCT_PATTERN.sub(" ", text)
-
-    # Token'lara böl, kısa ve stopword olanları çıkar
-    tokens = [
-        token for token in text.split()
-        if len(token) > 2
-        and token not in STOPWORDS
-        and not NUMBER_PATTERN.match(token)
-    ]
-
-    return " ".join(tokens)
+from src.text_utils import advanced_preprocessing
+from src.predict import PHISHING_THRESHOLD
 
 
 def main() -> None:
@@ -169,6 +112,24 @@ def main() -> None:
     with open(model_path, "wb") as f:
         pickle.dump({"vectorizer": vectorizer, "model": model}, f)
     print(f"✅ Model kaydedildi: {model_path}")
+
+    # Dashboard için tam dataset üzerinde tahmin yap
+    print("⚙️  Tam dataset üzerinde tahmin yapılıyor...")
+    X_all_tfidf = vectorizer.transform(X)
+    y_prob_all = model.predict_proba(X_all_tfidf)[:, 1]
+    y_pred_all = (y_prob_all * 100 >= PHISHING_THRESHOLD).astype(int)
+
+    test_results_path = model_path.parent / "test_results.pkl"
+    with open(test_results_path, "wb") as f:
+        pickle.dump({
+            "y_test": y.values,
+            "y_pred": y_pred_all,
+            "y_prob": y_prob_all,
+            "dataset_size": len(df),
+            "train_size": len(X_train),
+            "test_size": len(df),
+        }, f)
+    print(f"✅ Dashboard sonuçları kaydedildi: {test_results_path}")
 
 
 if __name__ == "__main__":

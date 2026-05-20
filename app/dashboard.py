@@ -12,8 +12,7 @@ from sklearn.metrics import confusion_matrix, roc_curve, auc, accuracy_score, pr
 from sklearn.model_selection import train_test_split
 
 from src.predict import predict_details, PHISHING_THRESHOLD
-from src.text_utils import build_email_text
-from src.train_model import advanced_preprocessing
+from src.text_utils import advanced_preprocessing, build_email_text
 
 st.set_page_config(
     page_title="Phishing E-posta Tespiti",
@@ -205,45 +204,33 @@ with tab1:
 # ══════════════════════════════════════════════════════════
 with tab2:
     st.markdown("## 📊 Model Performans Raporu")
-    st.markdown("<p style='color:#6c7086; font-size:14px;'>Test verisi üzerinde hesaplanan metrikler ve grafikler.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='color:#6c7086; font-size:14px;'>Eğitim sırasında kaydedilen test verisi metrikleri.</p>", unsafe_allow_html=True)
     st.divider()
 
     def load_performance_data():
-        project_root = Path(__file__).resolve().parents[1]
-        model_path   = project_root / "models" / "phishing_model.pkl"
-        clean_path   = project_root / "data" / "emails_clean.csv"
-        orig_path    = project_root / "data" / "emails.csv"
+        project_root    = Path(__file__).resolve().parents[1]
+        results_path    = project_root / "models" / "test_results.pkl"
 
-        with open(model_path, "rb") as f:
-            saved = pickle.load(f)
-        model      = saved["model"]
-        vectorizer = saved["vectorizer"]
+        if not results_path.exists():
+            raise FileNotFoundError(
+                "Test sonuçları bulunamadı. Önce `python src/train_model.py` çalıştırın."
+            )
 
-        data_path = clean_path if clean_path.exists() else orig_path
-        df = pd.read_csv(data_path)
-        df["clean_text"] = df["body"].apply(advanced_preprocessing)
-        df = df[df["clean_text"].str.strip() != ""]
+        with open(results_path, "rb") as f:
+            r = pickle.load(f)
 
-        X = df["clean_text"]
-        y = df["label"].astype(int)
-        _, X_test, _, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
-
-        X_test_tfidf = vectorizer.transform(X_test)
-        y_prob = model.predict_proba(X_test_tfidf)[:, 1]
-        y_pred = (y_prob * 100 >= PHISHING_THRESHOLD).astype(int)
-
-        return y_test.values, y_pred, y_prob
+        return r["y_test"], r["y_pred"], r["y_prob"], r.get("dataset_size", 0), r.get("test_size", 0)
 
     try:
-        y_test, y_pred, y_prob = load_performance_data()
+        y_test, y_pred, y_prob, dataset_size, test_size = load_performance_data()
 
-        cm = confusion_matrix(y_test, y_pred)
+        cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
         tn, fp, fn, tp = cm.ravel()
 
         accuracy  = accuracy_score(y_test, y_pred)
-        precision = precision_score(y_test, y_pred)
-        recall    = recall_score(y_test, y_pred)
-        f1        = f1_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred, zero_division=0)
+        recall    = recall_score(y_test, y_pred, zero_division=0)
+        f1        = f1_score(y_test, y_pred, zero_division=0)
 
         # ── Metrik kartları ───────────────────────────────────────────────────
         c1, c2, c3, c4 = st.columns(4)
@@ -260,6 +247,15 @@ with tab2:
                     <div class="perf-label">{lbl}</div>
                 </div>
                 """, unsafe_allow_html=True)
+
+        if dataset_size:
+            st.markdown(
+                f"<div style='font-family:JetBrains Mono; font-size:12px; color:#6c7086; margin:8px 0 16px;'>"
+                f"Toplam dataset: <strong style='color:#cdd6f4'>{dataset_size:,}</strong> e-posta &nbsp;·&nbsp; "
+                f"Grafikler: <strong style='color:#cdd6f4'>{test_size:,}</strong> e-posta"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
 
         st.markdown("<br>", unsafe_allow_html=True)
 
