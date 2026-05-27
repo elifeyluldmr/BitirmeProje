@@ -60,30 +60,38 @@ def load_deysi_spam() -> pd.DataFrame:
 
 
 def load_language_id_turkish() -> pd.DataFrame:
-    """papluca/language-identification — Türkçe cümleler, normal e-posta olarak etiketlenir."""
-    d = load_dataset("papluca/language-identification", split="train")
+    """papluca/language-identification — tüm split'lerden Türkçe cümleler, normal."""
     rows = []
-    for item in d:
-        if str(item.get("labels", "")).strip() == "tr":
-            body = str(item["text"]).strip()
-            if body and len(body) > 20:
-                rows.append({"body": body, "label": 0})
+    for split in ("train", "test", "validation"):
+        try:
+            d = load_dataset("papluca/language-identification", split=split)
+            for item in d:
+                if str(item.get("labels", "")).strip() == "tr":
+                    body = str(item["text"]).strip()
+                    if body and len(body) > 20:
+                        rows.append({"body": body, "label": 0})
+        except Exception:
+            pass
     df = pd.DataFrame(rows)
-    print(f"  TR lang-id     : {len(df):,} satır (normal, Türkçe)")
+    print(f"  TR lang-id     : {len(df):,} satır (normal, Türkçe, tüm split'ler)")
     return df
 
 
 def load_language_id_english_normal() -> pd.DataFrame:
-    """papluca/language-identification — İngilizce cümleler, normal olarak etiketlenir."""
-    d = load_dataset("papluca/language-identification", split="train")
+    """papluca/language-identification — tüm split'lerden İngilizce cümleler, normal."""
     rows = []
-    for item in d:
-        if str(item.get("labels", "")).strip() == "en":
-            body = str(item["text"]).strip()
-            if body and len(body) > 20:
-                rows.append({"body": body, "label": 0})
+    for split in ("train", "test", "validation"):
+        try:
+            d = load_dataset("papluca/language-identification", split=split)
+            for item in d:
+                if str(item.get("labels", "")).strip() == "en":
+                    body = str(item["text"]).strip()
+                    if body and len(body) > 20:
+                        rows.append({"body": body, "label": 0})
+        except Exception:
+            pass
     df = pd.DataFrame(rows)
-    print(f"  EN lang-id     : {len(df):,} satır (normal, İngilizce)")
+    print(f"  EN lang-id     : {len(df):,} satır (normal, İngilizce, tüm split'ler)")
     return df
 
 

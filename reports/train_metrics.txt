@@ -1,13 +1,13 @@
-Accuracy : 0.9835
-Precision: 0.9854
-Recall   : 0.9801
-F1 Score : 0.9827
+Accuracy : 0.9816
+Precision: 0.9840
+Recall   : 0.9766
+F1 Score : 0.9803
 
               precision    recall  f1-score   support
 
-      Normal       0.98      0.99      0.98     11755
-    Phishing       0.99      0.98      0.98     10727
+      Normal       0.98      0.99      0.98     11145
+    Phishing       0.98      0.98      0.98      9779
 
-    accuracy                           0.98     22482
-   macro avg       0.98      0.98      0.98     22482
-weighted avg       0.98      0.98      0.98     22482
+    accuracy                           0.98     20924
+   macro avg       0.98      0.98      0.98     20924
+weighted avg       0.98      0.98      0.98     20924

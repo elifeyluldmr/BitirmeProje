@@ -628,7 +628,7 @@ def _normal_evcil_hayvan():
         f"Evcil hayvan sağlık sigortası: {r(['köpeğinizin', 'kedinizin'])} yıllık sağlık kontrolü zamanı geldi. Veterinerinizle randevu alabilirsiniz.",
         f"Pet shop siparişiniz hazır. {r(['mama', 'kedi kumu', 'oyuncak', 'tasma'])} siparişiniz şubeye ulaştı, teslim alabilirsiniz.",
         f"Çip kaydı hatırlatması: {r(['köpeğinizin', 'kedinizin'])} kimlik çipi kaydının güncellenmesi gerekiyor. En yakın veterinere uğrayabilirsiniz.",
-        f"Mama stok uyarısı: Düzenli sipariş verdiğiniz {r(['Hill\'s', 'Royal Canin', 'Purina', 'Whiskas'])} mama tükenmek üzere. Yeniden sipariş vermek ister misiniz?",
+        f"Mama stok uyarısı: Düzenli sipariş verdiğiniz {r(['Hills', 'Royal Canin', 'Purina', 'Whiskas'])} mama tükenmek üzere. Yeniden sipariş vermek ister misiniz?",
         f"Tırnak kesimi hatırlatması: {r(['köpeğinizin', 'kedinizin'])} son tırnak kesiminden 6 hafta geçti.",
         f"Barınak gönüllü etkinliği: {tarih()} Cumartesi sahipsiz hayvanları gezdirme etkinliğimize katılmak ister misiniz?",
         f"Veteriner raporu hazır: {r(['kan tahlili', 'röntgen', 'ultrason'])} sonuçları hazır. Kliniği arayarak öğrenebilirsiniz.",
