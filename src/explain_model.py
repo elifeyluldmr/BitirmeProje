@@ -5,9 +5,9 @@ import shap
 from scipy.sparse import csr_matrix
 
 try:
-    from src.text_utils import preprocessing
+    from src.text_utils import advanced_preprocessing
 except ModuleNotFoundError:
-    from text_utils import preprocessing
+    from text_utils import advanced_preprocessing
 
 
 def load_model_and_vectorizer() -> tuple[object, object]:
@@ -38,31 +38,66 @@ def get_top_words(shap_values: object, feature_names: object, top_n: int = 10) -
     return word_scores[:top_n]
 
 
-def main() -> None:
-    """Ornek bir e-posta metni icin SHAP kullanarak en etkili kelimeleri ekrana yazar."""
-    sample_email = "Urgent! Verify your account now. Click the link and login to update your password."
+def get_shap_explanation(
+    text: str, model: object, vectorizer: object, top_n: int = 12
+) -> list[tuple[str, float]]:
+    """Verilen metin için SHAP değerlerini hesaplar.
 
-    # Egitilmiş modeli ve TF-IDF vectorizer'i yükle.
-    model, vectorizer = load_model_and_vectorizer()
-
-    # Ornek metni temizle ve TF-IDF ile dönüştür.
-    clean_text = preprocessing(sample_email)
+    Pozitif değer → phishing yönünde etkili
+    Negatif değer → normal yönünde etkili
+    """
+    clean_text = advanced_preprocessing(text)
     text_vector = vectorizer.transform([clean_text])
-
-    # SHAP için boş bir arka plan vektörü oluştur.
     background = csr_matrix((1, text_vector.shape[1]))
 
-    # Model kararını hangi kelimelerin etkilediğini hesapla.
     explainer = shap.LinearExplainer(model, background)
     shap_values = explainer(text_vector)
 
-    # En etkili kelimeleri al.
     feature_names = vectorizer.get_feature_names_out()
-    top_words = get_top_words(shap_values, feature_names)
+    return get_top_words(shap_values, feature_names, top_n)
 
-    print("En onemli kelimeler:")
-    for word, score in top_words:
-        print(f"- {word}: {score:.4f}")
+
+def get_lime_explanation(
+    text: str, model: object, vectorizer: object, top_n: int = 12
+) -> list[tuple[str, float]]:
+    """LIME kullanarak modelin kararını kelime bazında açıklar.
+
+    Pozitif değer → phishing yönünde etkili
+    Negatif değer → normal yönünde etkili
+    """
+    from lime.lime_text import LimeTextExplainer
+
+    def predict_proba(texts: list[str]) -> object:
+        vectors = vectorizer.transform([advanced_preprocessing(t) for t in texts])
+        return model.predict_proba(vectors)
+
+    explainer = LimeTextExplainer(class_names=["Normal", "Phishing"])
+    explanation = explainer.explain_instance(
+        text, predict_proba, num_features=top_n, num_samples=300
+    )
+    return explanation.as_list(label=1)
+
+
+def main() -> None:
+    """Örnek bir e-posta metni için SHAP ve LIME açıklamalarını ekrana yazar."""
+    sample_email = "Urgent! Verify your account now. Click the link and login to update your password."
+
+    model, vectorizer = load_model_and_vectorizer()
+
+    print("=== SHAP Açıklaması ===")
+    shap_words = get_shap_explanation(sample_email, model, vectorizer)
+    for word, score in shap_words:
+        direction = "→ PHISHİNG" if score > 0 else "→ NORMAL"
+        print(f"  {word}: {score:.4f}  {direction}")
+
+    print("\n=== LIME Açıklaması ===")
+    try:
+        lime_words = get_lime_explanation(sample_email, model, vectorizer)
+        for word, score in lime_words:
+            direction = "→ PHISHİNG" if score > 0 else "→ NORMAL"
+            print(f"  {word}: {score:.4f}  {direction}")
+    except ImportError:
+        print("  LIME kurulu değil: pip install lime")
 
 
 if __name__ == "__main__":

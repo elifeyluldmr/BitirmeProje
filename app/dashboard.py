@@ -93,7 +93,7 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 </style>
 """, unsafe_allow_html=True)
 
-tab1, tab2 = st.tabs(["🔍 E-posta Analizi", "📊 Model Performansı"])
+tab1, tab2, tab3 = st.tabs(["🔍 E-posta Analizi", "📊 Model Performansı", "📂 Toplu Analiz"])
 
 # ══════════════════════════════════════════════════════════
 # SEKME 1 — E-posta Analizi
@@ -105,6 +105,14 @@ with tab1:
 
     subject = st.text_input("📌 Konu (Subject)", placeholder="Örn: Hesabınız askıya alındı")
     body = st.text_area("📄 İçerik (Body)", height=200, placeholder="Örn: Hesabınıza şüpheli giriş yapıldı. Hemen doğrulayın...")
+
+    with st.expander("📧 Başlık Analizi (opsiyonel) — From / Reply-To"):
+        hcol1, hcol2 = st.columns(2)
+        with hcol1:
+            from_addr = st.text_input("Gönderici (From)", placeholder="ornek@banka-guvenli.tk")
+        with hcol2:
+            reply_to = st.text_input("Yanıt Adresi (Reply-To)", placeholder="saldirgan@gmail.com")
+
     analyze_clicked = st.button("🔍 Analiz Et", use_container_width=True, type="primary")
 
     if analyze_clicked:
@@ -112,8 +120,9 @@ with tab1:
             st.warning("⚠️ Lütfen en az bir alan doldurun.")
         else:
             try:
-                text = build_email_text(subject, body)
-                result = predict_details(text)
+                from src.predict import predict_details_with_headers
+                text   = build_email_text(subject, body)
+                result = predict_details_with_headers(text, from_addr, reply_to, subject)
 
                 label         = result["label"]
                 confidence    = result["confidence"]
@@ -121,6 +130,11 @@ with tab1:
                 phish_prob    = result["phishing_probability"]
                 keyword_score = result["keyword_score"]
                 keywords      = result["matched_keywords"]
+                phishing_type   = result.get("phishing_type", "")
+                url_analysis    = result.get("url_analysis", {"urls": [], "max_score": 0, "suspicious_count": 0, "total_count": 0})
+                anomaly         = result.get("anomaly", {"score": 0, "is_anomaly": False, "available": False})
+                header_analysis = result.get("header_analysis", {"score": 0, "flags": [], "is_suspicious": False})
+                actions         = result.get("actions", [])
 
                 is_phishing   = label == "YES"
                 verdict_class = "verdict-phishing" if is_phishing else "verdict-safe"
@@ -194,6 +208,189 @@ with tab1:
                     st.markdown(tags_html, unsafe_allow_html=True)
                 else:
                     st.markdown("<div style='color:#6c7086; font-size:13px;'>Belirgin şüpheli kelime bulunamadı.</div>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                # ── Anomali Skoru + Header Analizi ───────────────────────────
+                a_col1, a_col2 = st.columns(2)
+                with a_col1:
+                    if anomaly["available"]:
+                        a_score = anomaly["score"]
+                        a_color = "#f38ba8" if anomaly["is_anomaly"] else "#a6e3a1"
+                        a_label = "ANOMALİ" if anomaly["is_anomaly"] else "Normal Kalıp"
+                        st.markdown(
+                            f'<div class="metric-card"><div class="metric-label">🧬 Anomali Skoru</div>'
+                            f'<div class="metric-value" style="color:{a_color}">{a_score:.0f}/100</div>'
+                            f'<div style="font-size:11px; color:{a_color}; margin-top:2px;">{a_label}</div></div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            '<div class="metric-card"><div class="metric-label">🧬 Anomali Skoru</div>'
+                            '<div style="font-size:12px; color:#6c7086; margin-top:6px;">Model eğitilmedi —<br>train_model.py çalıştırın</div></div>',
+                            unsafe_allow_html=True,
+                        )
+                with a_col2:
+                    h_score = header_analysis.get("score", 0)
+                    h_color = "#f38ba8" if header_analysis.get("is_suspicious") else "#a6e3a1"
+                    h_flags = header_analysis.get("flags", [])
+                    st.markdown(
+                        f'<div class="metric-card"><div class="metric-label">📧 Başlık Risk Skoru</div>'
+                        f'<div class="metric-value" style="color:{h_color}">{h_score}/100</div>'
+                        f'<div style="font-size:11px; color:#6c7086; margin-top:2px;">{len(h_flags)} uyarı</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                if h_flags:
+                    for flag in h_flags:
+                        st.markdown(
+                            f"<div style='background:#1e1e2e; border-left:3px solid #f9e2af; border-radius:6px; "
+                            f"padding:6px 14px; margin:3px 0; font-family:JetBrains Mono; font-size:12px; color:#f9e2af;'>"
+                            f"⚠️ {flag}</div>",
+                            unsafe_allow_html=True,
+                        )
+
+                # ── Phishing Türü ─────────────────────────────────────────────
+                if is_phishing and phishing_type:
+                    type_colors = {
+                        "Finansal Dolandırıcılık": "#f9e2af",
+                        "Kimlik Hırsızlığı":       "#cba6f7",
+                        "Kötü Amaçlı Link":         "#f38ba8",
+                        "Sahte Ödül/Çekiliş":       "#fab387",
+                        "Sahte Kargo/Teslimat":     "#89dceb",
+                        "Marka Taklidi":            "#a6e3a1",
+                        "Genel Phishing":           "#6c7086",
+                    }
+                    badge_color = type_colors.get(phishing_type, "#6c7086")
+                    st.markdown(
+                        f"<div style='margin-top:16px;'>"
+                        f"<span class='metric-label'>🏷️ Saldırı Türü</span><br>"
+                        f"<span style='display:inline-block; margin-top:6px; background:#1e1e2e; border:1px solid {badge_color}; "
+                        f"color:{badge_color}; border-radius:20px; padding:4px 16px; font-family:JetBrains Mono; font-size:13px; font-weight:700;'>"
+                        f"{phishing_type}</span></div>",
+                        unsafe_allow_html=True,
+                    )
+
+                # ── URL Analizi ───────────────────────────────────────────────
+                if url_analysis["total_count"] > 0:
+                    st.markdown("<div style='margin-top:20px;'>", unsafe_allow_html=True)
+                    st.markdown("### 🔗 URL Analizi")
+                    url_col1, url_col2 = st.columns(2)
+                    with url_col1:
+                        susp = url_analysis["suspicious_count"]
+                        total = url_analysis["total_count"]
+                        label_color = "#f38ba8" if susp > 0 else "#a6e3a1"
+                        st.markdown(
+                            f'<div class="metric-card"><div class="metric-label">Şüpheli URL</div>'
+                            f'<div class="metric-value" style="color:{label_color}">{susp} / {total}</div></div>',
+                            unsafe_allow_html=True,
+                        )
+                    with url_col2:
+                        mx = url_analysis["max_score"]
+                        mx_color = "#f38ba8" if mx >= 40 else "#f9e2af" if mx >= 20 else "#a6e3a1"
+                        st.markdown(
+                            f'<div class="metric-card"><div class="metric-label">Maks URL Risk Skoru</div>'
+                            f'<div class="metric-value" style="color:{mx_color}">{mx}/100</div></div>',
+                            unsafe_allow_html=True,
+                        )
+                    for url_item in url_analysis["urls"]:
+                        if url_item["flags"]:
+                            flags_html = " &nbsp;·&nbsp; ".join(url_item["flags"])
+                            border = "#f38ba8" if url_item["is_suspicious"] else "#313244"
+                            st.markdown(
+                                f"<div style='background:#1e1e2e; border-left:3px solid {border}; "
+                                f"border-radius:6px; padding:8px 14px; margin:4px 0; font-family:JetBrains Mono; font-size:12px;'>"
+                                f"<span style='color:#cdd6f4'>{url_item['url']}</span><br>"
+                                f"<span style='color:#6c7086'>{flags_html}</span></div>",
+                                unsafe_allow_html=True,
+                            )
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+                # ── SHAP Açıklaması ───────────────────────────────────────────
+                st.markdown("<div style='margin-top:20px;'>", unsafe_allow_html=True)
+                st.markdown("### 🧠 Model Kararı — SHAP Açıklaması")
+                try:
+                    from src.explain_model import get_shap_explanation
+                    from src.predict import load_model_objects as _load_models
+                    _model, _vectorizer = _load_models()
+                    shap_words = get_shap_explanation(text, _model, _vectorizer, top_n=12)
+                    if shap_words:
+                        shap_words_sorted = sorted(shap_words, key=lambda x: x[1])
+                        sw_labels = [w for w, _ in shap_words_sorted]
+                        sw_scores = [s for _, s in shap_words_sorted]
+                        sw_colors = ["#f38ba8" if s > 0 else "#a6e3a1" for s in sw_scores]
+                        fig_shap = go.Figure(go.Bar(
+                            x=sw_scores, y=sw_labels, orientation="h",
+                            marker_color=sw_colors,
+                            hovertemplate="%{y}: %{x:.4f}<extra></extra>",
+                        ))
+                        fig_shap.update_layout(
+                            paper_bgcolor="#1e1e2e", plot_bgcolor="#1e1e2e",
+                            font=dict(color="#cdd6f4", family="JetBrains Mono"),
+                            xaxis=dict(title="SHAP Değeri", gridcolor="#313244", color="#6c7086", zeroline=True, zerolinecolor="#6c7086"),
+                            yaxis=dict(gridcolor="#313244", color="#cdd6f4"),
+                            margin=dict(l=10, r=10, t=10, b=10),
+                            height=340,
+                        )
+                        st.plotly_chart(fig_shap, use_container_width=True)
+                        st.markdown(
+                            "<div style='font-size:12px; color:#6c7086; font-family:JetBrains Mono;'>"
+                            "<span style='color:#f38ba8'>■</span> Phishing yönünde etkili &nbsp;·&nbsp; "
+                            "<span style='color:#a6e3a1'>■</span> Normal yönünde etkili</div>",
+                            unsafe_allow_html=True,
+                        )
+                except Exception as shap_err:
+                    st.info(f"SHAP hesaplanamadı: {shap_err}")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                # ── LIME Açıklaması ───────────────────────────────────────────
+                st.markdown("<div style='margin-top:20px;'>", unsafe_allow_html=True)
+                st.markdown("### 🔬 Model Kararı — LIME Açıklaması")
+                try:
+                    from src.explain_model import get_lime_explanation
+                    from src.predict import load_model_objects as _load_models2
+                    _model2, _vectorizer2 = _load_models2()
+                    with st.spinner("LIME hesaplanıyor..."):
+                        lime_words = get_lime_explanation(text, _model2, _vectorizer2, top_n=12)
+                    if lime_words:
+                        lime_sorted = sorted(lime_words, key=lambda x: x[1])
+                        lw_labels = [w for w, _ in lime_sorted]
+                        lw_scores = [s for _, s in lime_sorted]
+                        lw_colors = ["#f38ba8" if s > 0 else "#a6e3a1" for s in lw_scores]
+                        fig_lime = go.Figure(go.Bar(
+                            x=lw_scores, y=lw_labels, orientation="h",
+                            marker_color=lw_colors,
+                            hovertemplate="%{y}: %{x:.4f}<extra></extra>",
+                        ))
+                        fig_lime.update_layout(
+                            paper_bgcolor="#1e1e2e", plot_bgcolor="#1e1e2e",
+                            font=dict(color="#cdd6f4", family="JetBrains Mono"),
+                            xaxis=dict(title="LIME Etkisi", gridcolor="#313244", color="#6c7086", zeroline=True, zerolinecolor="#6c7086"),
+                            yaxis=dict(gridcolor="#313244", color="#cdd6f4"),
+                            margin=dict(l=10, r=10, t=10, b=10),
+                            height=340,
+                        )
+                        st.plotly_chart(fig_lime, use_container_width=True)
+                        st.markdown(
+                            "<div style='font-size:12px; color:#6c7086; font-family:JetBrains Mono;'>"
+                            "LIME, metni bozarak hangi kelimelerin kararı değiştirdiğini ölçer.</div>",
+                            unsafe_allow_html=True,
+                        )
+                except Exception as lime_err:
+                    st.info(f"LIME hesaplanamadı: {lime_err}")
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                # ── Aksiyon Önerileri ─────────────────────────────────────────
+                st.markdown("<div style='margin-top:20px;'>", unsafe_allow_html=True)
+                st.markdown("### 📋 Önerilen Aksiyonlar")
+                action_border = "#f38ba8" if is_phishing else "#a6e3a1"
+                action_icon   = "🚨" if is_phishing else "✅"
+                for action in actions:
+                    st.markdown(
+                        f"<div style='background:#1e1e2e; border-left:3px solid {action_border}; "
+                        f"border-radius:6px; padding:10px 16px; margin:4px 0; "
+                        f"font-family:JetBrains Mono; font-size:13px; color:#cdd6f4;'>"
+                        f"{action_icon} {action}</div>",
+                        unsafe_allow_html=True,
+                    )
                 st.markdown("</div>", unsafe_allow_html=True)
 
             except FileNotFoundError as error:
@@ -363,7 +560,144 @@ with tab2:
         )
         st.plotly_chart(fig_dist, use_container_width=True)
 
+        # ── Precision@k ──────────────────────────────────────────────────────
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("### 🎯 Precision@k")
+        k_values = [10, 50, 100, 500]
+        sorted_idx = np.argsort(y_prob)[::-1]
+        pk_cols = st.columns(len(k_values))
+        for col, k in zip(pk_cols, k_values):
+            if k <= len(y_test):
+                top_k_labels = y_test[sorted_idx[:k]]
+                pk = top_k_labels.sum() / k
+                with col:
+                    st.markdown(f"""
+                    <div class="perf-card">
+                        <div class="perf-value">%{pk*100:.1f}</div>
+                        <div class="perf-label">P@{k}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # ── Transformer Model Karşılaştırması ─────────────────────────────────
+        transformer_path = Path(__file__).resolve().parents[1] / "models" / "transformer_test_results.pkl"
+        if transformer_path.exists():
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("### 🤖 Model Karşılaştırması: TF-IDF + LR vs Transformer")
+            with open(transformer_path, "rb") as f:
+                tr = pickle.load(f)
+
+            comp_cols = st.columns(4)
+            metrics = [
+                ("Accuracy",  accuracy,      tr.get("accuracy", 0)),
+                ("Precision", precision,     tr.get("precision", 0)),
+                ("Recall",    recall,        tr.get("recall", 0)),
+                ("F1 Score",  f1,            tr.get("f1", 0)),
+            ]
+            for col, (label_m, lr_val, tr_val) in zip(comp_cols, metrics):
+                better = tr_val >= lr_val
+                tr_color = "#a6e3a1" if better else "#f38ba8"
+                with col:
+                    st.markdown(f"""
+                    <div class="perf-card">
+                        <div class="perf-label">{label_m}</div>
+                        <div style="margin-top:8px; font-family:JetBrains Mono; font-size:13px; color:#6c7086;">TF-IDF+LR</div>
+                        <div style="font-size:22px; font-weight:700; color:#89b4fa;">%{lr_val*100:.1f}</div>
+                        <div style="margin-top:6px; font-family:JetBrains Mono; font-size:13px; color:#6c7086;">Transformer</div>
+                        <div style="font-size:22px; font-weight:700; color:{tr_color};">%{tr_val*100:.1f}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        else:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.info("🤖 Transformer modeli henüz eğitilmedi. `python src/train_transformer.py` çalıştırın.")
+
     except FileNotFoundError:
         st.error("❌ Model bulunamadı. Önce `python src/train_model.py` çalıştırın.")
     except Exception as e:
         st.error(f"❌ Hata: {e}")
+
+# ══════════════════════════════════════════════════════════
+# SEKME 3 — Toplu Analiz
+# ══════════════════════════════════════════════════════════
+with tab3:
+    st.markdown("## 📂 Toplu E-posta Analizi")
+    st.markdown("<p style='color:#6c7086; font-size:14px;'>Birden fazla e-postayı aynı anda analiz edin, risk skoruna göre önceliklendirilmiş liste alın.</p>", unsafe_allow_html=True)
+    st.divider()
+
+    batch_mode = st.radio("Giriş yöntemi", ["📝 Metin Girişi", "📁 CSV Yükle"], horizontal=True)
+
+    emails_to_analyze: list[str] = []
+
+    if batch_mode == "📝 Metin Girişi":
+        st.markdown("Her satıra bir e-posta içeriği yazın:")
+        batch_text = st.text_area("E-postalar (her satır = bir e-posta)", height=200,
+                                   placeholder="1. e-posta metni\n2. e-posta metni\n3. e-posta metni")
+        if batch_text.strip():
+            emails_to_analyze = [line.strip() for line in batch_text.strip().splitlines() if line.strip()]
+    else:
+        uploaded = st.file_uploader("CSV yükle (body sütunu gerekli)", type=["csv"])
+        if uploaded:
+            try:
+                batch_df = pd.read_csv(uploaded)
+                col_name = "body" if "body" in batch_df.columns else batch_df.columns[0]
+                emails_to_analyze = batch_df[col_name].dropna().astype(str).tolist()
+                st.success(f"✅ {len(emails_to_analyze)} e-posta yüklendi ('{col_name}' sütunu)")
+            except Exception as ex:
+                st.error(f"CSV okunamadı: {ex}")
+
+    batch_clicked = st.button("🔍 Toplu Analiz Başlat", use_container_width=True, type="primary",
+                               disabled=len(emails_to_analyze) == 0)
+
+    if batch_clicked and emails_to_analyze:
+        max_batch = 200
+        if len(emails_to_analyze) > max_batch:
+            st.warning(f"⚠️ İlk {max_batch} e-posta analiz edildi (toplam: {len(emails_to_analyze)})")
+            emails_to_analyze = emails_to_analyze[:max_batch]
+
+        results_list = []
+        progress = st.progress(0, text="Analiz ediliyor...")
+        for i, email_text in enumerate(emails_to_analyze):
+            try:
+                res = predict_details(email_text)
+                results_list.append({
+                    "No":            i + 1,
+                    "Önizleme":      email_text[:60] + "..." if len(email_text) > 60 else email_text,
+                    "Karar":         res["label"],
+                    "Risk Skoru":    round(res["risk_score"], 1),
+                    "Model Olasılık": round(res["phishing_probability"], 1),
+                    "Phishing Türü": res.get("phishing_type", ""),
+                    "URL Sayısı":    res["url_analysis"]["total_count"],
+                    "Şüpheli URL":   res["url_analysis"]["suspicious_count"],
+                })
+            except Exception:
+                results_list.append({
+                    "No": i + 1, "Önizleme": email_text[:60], "Karar": "HATA",
+                    "Risk Skoru": 0, "Model Olasılık": 0, "Phishing Türü": "",
+                    "URL Sayısı": 0, "Şüpheli URL": 0,
+                })
+            progress.progress((i + 1) / len(emails_to_analyze), text=f"Analiz ediliyor... {i+1}/{len(emails_to_analyze)}")
+
+        progress.empty()
+        results_df = pd.DataFrame(results_list).sort_values("Risk Skoru", ascending=False).reset_index(drop=True)
+
+        phishing_count = (results_df["Karar"] == "YES").sum()
+        normal_count   = (results_df["Karar"] == "NO").sum()
+
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric("Toplam E-posta", len(results_df))
+        sc2.metric("🚨 Phishing", phishing_count)
+        sc3.metric("✅ Güvenli", normal_count)
+
+        st.markdown("### 📋 Önceliklendirilmiş Liste (Risk Skoruna Göre)")
+
+        def color_row(row):
+            color = "background-color: #3b1219;" if row["Karar"] == "YES" else "background-color: #0d2b1e;"
+            return [color] * len(row)
+
+        st.dataframe(
+            results_df.style.apply(color_row, axis=1),
+            use_container_width=True,
+            height=400,
+        )
+
+        csv_out = results_df.to_csv(index=False).encode("utf-8")
+        st.download_button("⬇️ CSV İndir", csv_out, "phishing_analiz_sonuclari.csv", "text/csv")

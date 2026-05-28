@@ -17,6 +17,7 @@ from sklearn.model_selection import train_test_split
 
 from src.text_utils import advanced_preprocessing
 from src.predict import PHISHING_THRESHOLD
+from src.anomaly_detector import train_anomaly_model
 
 
 def main() -> None:
@@ -112,6 +113,14 @@ def main() -> None:
     with open(model_path, "wb") as f:
         pickle.dump({"vectorizer": vectorizer, "model": model}, f)
     print(f"✅ Model kaydedildi: {model_path}")
+
+    # Anomali modeli eğit — sadece normal e-postalar üzerinde
+    normal_texts = df[y == 0]["clean_text"].tolist()
+    anomaly_model = train_anomaly_model(normal_texts)
+    anomaly_model_path = model_path.parent / "anomaly_model.pkl"
+    with open(anomaly_model_path, "wb") as f:
+        pickle.dump(anomaly_model, f)
+    print(f"✅ Anomali modeli kaydedildi: {anomaly_model_path}")
 
     # Dashboard için tam dataset üzerinde tahmin yap
     print("⚙️  Tam dataset üzerinde tahmin yapılıyor...")
