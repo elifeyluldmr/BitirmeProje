@@ -200,6 +200,97 @@ with tab1:
                     unsafe_allow_html=True
                 )
 
+                # ── Sinyal Dağılımı (5 katman) ────────────────────────────────
+                bd = result.get("score_breakdown", {})
+                sigs = bd.get("signals", {})
+                if sigs:
+                    st.markdown("<div style='margin-top:20px;'>", unsafe_allow_html=True)
+                    st.markdown("### 🎛️ Sinyal Dağılımı — 5 Katmanlı Risk Skoru")
+
+                    # Transformer kullanıldıysa bilgi satırı
+                    if bd.get("transformer_used"):
+                        tr_prob = bd.get("transformer_probability", 0)
+                        lr_prob = bd.get("lr_probability", 0)
+                        st.markdown(
+                            f"<div style='background:#1a1a2e; border-left:3px solid #89b4fa; border-radius:6px; "
+                            f"padding:8px 14px; margin-bottom:8px; font-family:JetBrains Mono; font-size:12px; color:#89b4fa;'>"
+                            f"🤖 <strong>Transformer aktif</strong> — DistilBERT: %{tr_prob:.1f} &nbsp;·&nbsp; "
+                            f"TF-IDF LR: %{lr_prob:.1f} &nbsp;·&nbsp; Blend: %60 / %40</div>",
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            "<div style='background:#1e1e2e; border-left:3px solid #6c7086; border-radius:6px; "
+                            "padding:8px 14px; margin-bottom:8px; font-family:JetBrains Mono; font-size:12px; color:#6c7086;'>"
+                            "⚠️ Transformer modeli eğitilmemiş — yalnızca TF-IDF LR kullanılıyor. "
+                            "<code>python src/train_transformer.py</code></div>",
+                            unsafe_allow_html=True,
+                        )
+
+                    sig_labels = {
+                        "model":   "🤖 Model",
+                        "keyword": "🔑 Keyword",
+                        "url":     "🔗 URL",
+                        "header":  "📧 Header",
+                        "anomaly": "🧬 Anomali",
+                    }
+                    bar_names  = []
+                    bar_values = []
+                    bar_colors = []
+                    bar_texts  = []
+
+                    for key in ["model", "keyword", "url", "header", "anomaly"]:
+                        sig = sigs.get(key, {})
+                        avail = sig.get("available", True)
+                        contrib = sig.get("contribution", 0.0)
+                        score   = sig.get("score", 0.0)
+                        w_pct   = sig.get("weight_pct", 0.0)
+
+                        if not avail:
+                            label = f"{sig_labels[key]} (mevcut değil)"
+                            color = "#313244"
+                        else:
+                            label = f"{sig_labels[key]}  (%{w_pct:.0f})"
+                            color = "#f38ba8" if contrib > 0 else "#313244"
+
+                        bar_names.append(label)
+                        bar_values.append(round(contrib, 1))
+                        bar_colors.append(color)
+                        bar_texts.append(f"{score:.0f}/100 → +{contrib:.1f} pt")
+
+                    fig_signals = go.Figure(go.Bar(
+                        x=bar_values,
+                        y=bar_names,
+                        orientation="h",
+                        marker_color=bar_colors,
+                        text=bar_texts,
+                        textposition="outside",
+                        textfont={"size": 11, "color": "#6c7086", "family": "JetBrains Mono"},
+                        hovertemplate="%{y}: %{x:.1f} puan<extra></extra>",
+                    ))
+                    fig_signals.update_layout(
+                        paper_bgcolor="#1e1e2e",
+                        plot_bgcolor="#1e1e2e",
+                        font=dict(color="#cdd6f4", family="JetBrains Mono"),
+                        xaxis=dict(
+                            title="Risk Skoruna Katkı (puan)",
+                            gridcolor="#313244",
+                            color="#6c7086",
+                            range=[0, max(bar_values) * 1.5 + 5 if max(bar_values) > 0 else 20],
+                        ),
+                        yaxis=dict(gridcolor="#313244", color="#cdd6f4"),
+                        margin=dict(l=10, r=120, t=10, b=10),
+                        height=250,
+                    )
+                    st.plotly_chart(fig_signals, use_container_width=True)
+                    st.markdown(
+                        "<div style='font-size:12px; color:#6c7086; font-family:JetBrains Mono;'>"
+                        "Her çubuk, o sinyalin nihai risk skoruna katkısını gösterir (puan). "
+                        "Toplam = Risk Skoru.</div>",
+                        unsafe_allow_html=True,
+                    )
+                    st.markdown("</div>", unsafe_allow_html=True)
+
                 # ── Keyword tagları ──────────────────────────────────────────
                 st.markdown("<div style='margin-top:20px;'>", unsafe_allow_html=True)
                 if keywords:
@@ -430,17 +521,21 @@ with tab2:
         f1        = f1_score(y_test, y_pred, zero_division=0)
 
         # ── Metrik kartları ───────────────────────────────────────────────────
-        c1, c2, c3, c4 = st.columns(4)
-        for col, lbl, value in [
-            (c1, "Accuracy",  accuracy),
-            (c2, "Precision", precision),
-            (c3, "Recall",    recall),
-            (c4, "F1 Score",  f1),
+        fpr_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        for col, lbl, value, highlight in [
+            (c1, "Accuracy",           accuracy,  False),
+            (c2, "Precision",          precision, False),
+            (c3, "Recall",             recall,    False),
+            (c4, "F1 Score",           f1,        False),
+            (c5, "Yanlış Alarm Oranı", fpr_rate,  True),
         ]:
             with col:
+                val_color = "#f38ba8" if (highlight and value > 0.05) else "#89b4fa"
                 st.markdown(f"""
                 <div class="perf-card">
-                    <div class="perf-value">%{value*100:.1f}</div>
+                    <div class="perf-value" style="color:{val_color}">%{value*100:.1f}</div>
                     <div class="perf-label">{lbl}</div>
                 </div>
                 """, unsafe_allow_html=True)
