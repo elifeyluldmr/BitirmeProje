@@ -78,19 +78,61 @@ def get_lime_explanation(
     return explanation.as_list(label=1)
 
 
+def get_transformer_lime_explanation(
+    text: str,
+    top_n: int = 12,
+) -> list[tuple[str, float]]:
+    """Transformer modeli için LIME açıklaması üretir (black-box yaklaşım).
+
+    Transformer modeli eğitilmemişse boş liste döndürür.
+    Pozitif değer → phishing yönünde etkili
+    Negatif değer → normal yönünde etkili
+    """
+    try:
+        import src.transformer_predictor as _tr
+    except ModuleNotFoundError:
+        import transformer_predictor as _tr  # type: ignore
+
+    if not _tr.is_available():
+        return []
+
+    try:
+        from lime.lime_text import LimeTextExplainer
+    except ImportError:
+        return []
+
+    def predict_proba(texts: list[str]) -> object:
+        import numpy as np
+        probs = []
+        for t in texts:
+            p = _tr.predict(t)
+            phish = (p / 100.0) if p is not None else 0.5
+            probs.append([1.0 - phish, phish])
+        return np.array(probs)
+
+    explainer = LimeTextExplainer(class_names=["Normal", "Phishing"])
+    try:
+        explanation = explainer.explain_instance(
+            text, predict_proba, num_features=top_n, num_samples=200
+        )
+        return explanation.as_list(label=1)
+    except Exception:
+        return []
+
+
 def main() -> None:
     """Örnek bir e-posta metni için SHAP ve LIME açıklamalarını ekrana yazar."""
     sample_email = "Urgent! Verify your account now. Click the link and login to update your password."
 
     model, vectorizer = load_model_and_vectorizer()
 
-    print("=== SHAP Açıklaması ===")
+    print("=== SHAP Açıklaması (TF-IDF+LR) ===")
     shap_words = get_shap_explanation(sample_email, model, vectorizer)
     for word, score in shap_words:
         direction = "→ PHISHİNG" if score > 0 else "→ NORMAL"
         print(f"  {word}: {score:.4f}  {direction}")
 
-    print("\n=== LIME Açıklaması ===")
+    print("\n=== LIME Açıklaması (TF-IDF+LR) ===")
     try:
         lime_words = get_lime_explanation(sample_email, model, vectorizer)
         for word, score in lime_words:
@@ -98,6 +140,15 @@ def main() -> None:
             print(f"  {word}: {score:.4f}  {direction}")
     except ImportError:
         print("  LIME kurulu değil: pip install lime")
+
+    print("\n=== LIME Açıklaması (Transformer) ===")
+    tr_words = get_transformer_lime_explanation(sample_email)
+    if tr_words:
+        for word, score in tr_words:
+            direction = "→ PHISHİNG" if score > 0 else "→ NORMAL"
+            print(f"  {word}: {score:.4f}  {direction}")
+    else:
+        print("  Transformer modeli eğitilmemiş veya LIME kurulu değil.")
 
 
 if __name__ == "__main__":

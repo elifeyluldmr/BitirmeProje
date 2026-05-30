@@ -28,11 +28,12 @@ from sklearn.metrics import (
 
 from src.text_utils import normalize_optional_text
 
-MODEL_NAME = "distilbert-base-multilingual-cased"
-MAX_LEN    = 256
-BATCH_SIZE = 16
-EPOCHS     = 3
-LR         = 2e-5
+MODEL_NAME   = "distilbert-base-multilingual-cased"
+MAX_LEN      = 256
+BATCH_SIZE   = 8       # 4GB VRAM için güvenli değer
+EPOCHS       = 3
+LR           = 2e-5
+SAMPLE_SIZE  = 20_000  # Her sınıftan max örnek (toplam 40K)
 
 
 class EmailDataset(Dataset):
@@ -90,6 +91,12 @@ def main() -> None:
 
     df["text"] = df["body"].apply(normalize_optional_text)
     df = df[df["text"].str.strip() != ""].reset_index(drop=True)
+
+    # Dengeli örneklem — eğitim süresini GPU VRAM'e uygun tutar
+    phishing = df[df["label"] == 1].sample(min(SAMPLE_SIZE, (df["label"] == 1).sum()), random_state=42)
+    normal   = df[df["label"] == 0].sample(min(SAMPLE_SIZE, (df["label"] == 0).sum()), random_state=42)
+    df = pd.concat([phishing, normal]).sample(frac=1, random_state=42).reset_index(drop=True)
+    print(f"   Örneklem: {len(df):,} ({len(phishing):,} phishing + {len(normal):,} normal)")
 
     texts  = df["text"].tolist()
     labels = df["label"].astype(int).tolist()

@@ -8,11 +8,20 @@ _SUSPICIOUS_KEYWORDS = {
     "login", "verify", "secure", "account", "update", "confirm", "bank",
     "paypal", "signin", "password", "credential", "banking", "alert",
     "suspended", "urgent", "dogrula", "giris", "sifre", "hesap",
+    "odul", "odeme", "nakit", "teslim", "kimlik", "borc", "haciz",
+    "police", "guncelle", "sigorta",
 }
 
 _SUSPICIOUS_TLDS = {
     ".tk", ".ml", ".ga", ".cf", ".gq", ".xyz", ".top",
     ".click", ".work", ".ru", ".cn", ".pw", ".info",
+}
+
+# Ücretsiz hosting servislerinin domain parçaları — phishing'de yaygın kullanılır
+_FREE_HOSTING_PARTS = {
+    "free-host", "freehost", "000webhostapp", "atspace", "byet",
+    "infinityfree", "freehostia", "esy", "hol", "wixsite",
+    "netlify", "pages.dev", "github.io",
 }
 
 
@@ -55,6 +64,20 @@ def analyze_url(url: str) -> dict:
         if domain.count(".") > 3:
             score += 15
             flags.append("Aşırı subdomain sayısı")
+
+        domain_parts = domain.split(".")
+        for part in domain_parts:
+            if part in _FREE_HOSTING_PARTS:
+                score += 20
+                flags.append(f"Ücretsiz hosting servisi: '{part}'")
+                break
+
+        # Kısa çizgili subdomain (odul-teslim, guvenli-hesap gibi)
+        if domain.count(".") >= 1:
+            subdomain = domain_parts[0]
+            if "-" in subdomain and len(subdomain) > 5:
+                score += 10
+                flags.append(f"Kısa çizgili subdomain: '{subdomain}'")
 
         if "@" in url:
             score += 25

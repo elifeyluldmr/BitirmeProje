@@ -26,7 +26,7 @@ except ModuleNotFoundError:
     import transformer_predictor as _transformer
 
 # Phishing kararı için minimum risk skoru eşiği.
-PHISHING_THRESHOLD = 60.0
+PHISHING_THRESHOLD = 55.0
 
 # ── Katman ağırlıkları ────────────────────────────────────────────────────────
 # Header ve anomali yoksa bu ağırlıklar 0'a çekilerek kalan ağırlıklar
@@ -43,6 +43,7 @@ _LR_W          = 0.40
 
 _model_cache: dict = {}
 
+# Kural tabanlı yedek — ML modeli yüklü değilse kullanılır
 _PHISHING_TYPE_KEYWORDS: dict[str, list[str]] = {
     "Finansal Dolandırıcılık": [
         "bank", "payment", "invoice", "tax", "refund", "credit", "wire",
@@ -69,6 +70,24 @@ _PHISHING_TYPE_KEYWORDS: dict[str, list[str]] = {
         "facebook", "instagram", "twitter", "linkedin", "dhl", "fedex",
     ],
 }
+
+_type_classifier_cache: dict = {}
+
+
+def _load_type_classifier() -> dict | None:
+    """ML tür sınıflandırıcısını önbellekli yükler; yoksa None döner."""
+    project_root = Path(__file__).resolve().parents[1]
+    model_path = project_root / "models" / "type_classifier.pkl"
+    if not model_path.exists():
+        return None
+    mtime = model_path.stat().st_mtime
+    if _type_classifier_cache.get("mtime") == mtime:
+        return _type_classifier_cache.get("data")
+    with open(model_path, "rb") as f:
+        data = pickle.load(f)
+    _type_classifier_cache["data"] = data
+    _type_classifier_cache["mtime"] = mtime
+    return data
 
 
 def is_phishing_label(label: object) -> bool:
@@ -99,15 +118,33 @@ def load_model_objects() -> tuple[object, object]:
 
 
 def classify_phishing_type(text: str) -> str:
+    """Kural tabanlı skorlamayı önce dener; eşleşme yoksa ML modeline başvurur.
+
+    Kural tabanlı yöntem Türkçe anahtar kelimeler için daha güvenilirdir.
+    ML model yalnızca hiçbir kural eşleşmediğinde (Genel Phishing) devreye girer.
+    """
     text_lower = text.lower()
     type_scores: dict[str, int] = {}
     for ptype, keywords in _PHISHING_TYPE_KEYWORDS.items():
         score = sum(1 for kw in keywords if kw in text_lower)
         if score > 0:
             type_scores[ptype] = score
-    if not type_scores:
-        return "Genel Phishing"
-    return max(type_scores, key=lambda k: type_scores[k])
+
+    if type_scores:
+        return max(type_scores, key=lambda k: type_scores[k])
+
+    # Kural eşleşmesi yoksa ML modeline bak
+    clf_data = _load_type_classifier()
+    if clf_data is not None:
+        try:
+            clean = advanced_preprocessing(text)
+            vec = clf_data["vectorizer"].transform([clean])
+            pred_int = int(clf_data["model"].predict(vec)[0])
+            return clf_data["int_to_type"].get(pred_int, "Genel Phishing")
+        except Exception:
+            pass
+
+    return "Genel Phishing"
 
 
 def get_action_recommendations(label: str, phishing_type: str, risk_score: float) -> list[str]:

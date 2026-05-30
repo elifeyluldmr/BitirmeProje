@@ -225,6 +225,71 @@ def run_imap_pipeline(
     return summary
 
 
+def run_watch_pipeline(
+    host: str,
+    port: int,
+    user: str,
+    password: str,
+    folder: str,
+    max_emails: int,
+    output_path: str,
+    interval: int = 60,
+    min_risk: float = 0.0,
+    only_phishing: bool = False,
+    webhook_url: str | None = None,
+    mark_seen: bool = False,
+) -> None:
+    """IMAP kutusunu belirtilen aralıkla sürekli izler; yeni e-postalar gelince analiz eder.
+
+    Çıkmak için Ctrl+C.
+    """
+    import time
+    import signal
+
+    _stop = False
+
+    def _handle_sig(sig, frame):
+        nonlocal _stop
+        print("\n⏹️  İzleme durduruldu.")
+        _stop = True
+
+    signal.signal(signal.SIGINT, _handle_sig)
+    signal.signal(signal.SIGTERM, _handle_sig)
+
+    print(f"👁️  İzleme başladı — {host} | klasör: {folder} | aralık: {interval}s")
+    print("   Çıkmak için Ctrl+C\n")
+
+    cycle = 0
+    while not _stop:
+        cycle += 1
+        print(f"🔄  Döngü #{cycle} — {datetime.now().strftime('%H:%M:%S')}")
+        try:
+            summary = run_imap_pipeline(
+                host=host,
+                port=port,
+                user=user,
+                password=password,
+                folder=folder,
+                max_emails=max_emails,
+                output_path=output_path,
+                min_risk=min_risk,
+                only_phishing=only_phishing,
+                webhook_url=webhook_url,
+                mark_seen=mark_seen,
+            )
+            if summary["toplam"] == 0:
+                print("   Yeni e-posta yok.\n")
+            else:
+                print(f"   {summary['phishing']} phishing / {summary['toplam']} e-posta işlendi.\n")
+        except Exception as exc:
+            print(f"   ⚠️  Döngü hatası: {exc}\n")
+
+        for _ in range(interval):
+            if _stop:
+                break
+            time.sleep(1)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Phishing e-posta analiz pipeline'ı")
 
@@ -246,24 +311,47 @@ def main() -> None:
     parser.add_argument("--imap-max",     type=int, default=50,   help="Maksimum e-posta sayısı")
     parser.add_argument("--mark-seen",    action="store_true",    help="Analiz sonrası okundu olarak işaretle")
 
+    # Watch modu (sürekli izleme)
+    parser.add_argument("--watch",        action="store_true",
+                        help="IMAP kutusunu sürekli izle (--interval ile birlikte kullanın)")
+    parser.add_argument("--interval",     type=int, default=60,
+                        help="Watch modunda kontrol aralığı (saniye, varsayılan: 60)")
+
     args = parser.parse_args()
 
     if args.imap_host:
         if not args.imap_user or not args.imap_pass:
             parser.error("IMAP modu için --imap-user ve --imap-pass gereklidir.")
-        run_imap_pipeline(
-            host=args.imap_host,
-            port=args.imap_port,
-            user=args.imap_user,
-            password=args.imap_pass,
-            folder=args.imap_folder,
-            max_emails=args.imap_max,
-            output_path=args.output,
-            min_risk=args.min_risk,
-            only_phishing=args.only_phishing,
-            webhook_url=args.webhook,
-            mark_seen=args.mark_seen,
-        )
+
+        if args.watch:
+            run_watch_pipeline(
+                host=args.imap_host,
+                port=args.imap_port,
+                user=args.imap_user,
+                password=args.imap_pass,
+                folder=args.imap_folder,
+                max_emails=args.imap_max,
+                output_path=args.output,
+                interval=args.interval,
+                min_risk=args.min_risk,
+                only_phishing=args.only_phishing,
+                webhook_url=args.webhook,
+                mark_seen=args.mark_seen,
+            )
+        else:
+            run_imap_pipeline(
+                host=args.imap_host,
+                port=args.imap_port,
+                user=args.imap_user,
+                password=args.imap_pass,
+                folder=args.imap_folder,
+                max_emails=args.imap_max,
+                output_path=args.output,
+                min_risk=args.min_risk,
+                only_phishing=args.only_phishing,
+                webhook_url=args.webhook,
+                mark_seen=args.mark_seen,
+            )
     else:
         if not args.input:
             parser.error("CSV modu için --input gereklidir.")

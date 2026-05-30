@@ -52,9 +52,69 @@ def print_summary(df: pd.DataFrame) -> None:
         print(f"   {name} ({label}) : {count:,} (%{pct:.1f})")
 
 
+def merge_extra_csvs(base_df: pd.DataFrame) -> pd.DataFrame:
+    """data/ klasöründeki ek CSV dosyalarını base_df ile birleştirir.
+
+    Geçerli ek CSV: emails_clean.csv ve emails.csv dışındaki,
+    'body' ve 'label' kolonlarına sahip dosyalar.
+    Ayrıca 'text'+'label' veya 'message'+'label' kolonları da kabul edilir.
+    """
+    data_dir = Path(DATA_PATH).parent
+    skip = {"emails_clean.csv", "emails.csv", "emails.sample.csv", "turkish_translated.csv"}
+    extra_files = [
+        p for p in data_dir.glob("*.csv")
+        if p.name not in skip and p.stat().st_size > 100
+    ]
+
+    if not extra_files:
+        return base_df
+
+    frames = [base_df]
+    for path in extra_files:
+        try:
+            extra = pd.read_csv(path)
+            extra.columns = [c.strip().lower() for c in extra.columns]
+
+            # body kolonu bul
+            body_col = next(
+                (c for c in extra.columns if c in ("body", "text", "message", "email", "content")),
+                None,
+            )
+            # label kolonu bul
+            label_col = next(
+                (c for c in extra.columns if c in ("label", "labels", "spam", "type", "class")),
+                None,
+            )
+
+            if body_col is None or label_col is None:
+                print(f"   ⚠️  {path.name} atlandı — body/label kolonu bulunamadı")
+                continue
+
+            extra = extra[[body_col, label_col]].rename(columns={body_col: "body", label_col: "label"})
+            extra["body"]  = extra["body"].astype(str).str.strip()
+            extra["label"] = pd.to_numeric(extra["label"], errors="coerce")
+            extra = extra[extra["label"].isin([0, 1])].dropna(subset=["body"])
+            extra["label"] = extra["label"].astype(int)
+            extra = extra[extra["body"].str.len() >= 20]
+
+            frames.append(extra)
+            print(f"   ✅ {path.name}: {len(extra):,} satır eklendi")
+        except Exception as exc:
+            print(f"   ⚠️  {path.name} atlandı — {exc}")
+
+    if len(frames) == 1:
+        return base_df
+
+    combined = pd.concat(frames, ignore_index=True)
+    before = len(combined)
+    combined = combined.drop_duplicates(subset=["body"]).reset_index(drop=True)
+    print(f"   ✓ Birleştirme sonrası: {before:,} → {len(combined):,} (dedup)")
+    return combined
+
+
 def main() -> None:
     print("=" * 55)
-    print("  DATASET TEMİZLEME")
+    print("  DATASET TEMİZLEME & BİRLEŞTİRME")
     print("=" * 55)
 
     if not DATA_PATH.exists():
@@ -63,13 +123,17 @@ def main() -> None:
         return
 
     df = pd.read_csv(DATA_PATH)
-    print(f"📦 Orijinal satır sayısı: {len(df):,}")
+    print(f"📦 Temel dataset: {len(df):,} satır")
 
     df = clean_dataframe(df)
+
+    print("\n📂 Ek CSV dosyaları birleştiriliyor...")
+    df = merge_extra_csvs(df)
+
     print_summary(df)
 
     df.to_csv(OUTPUT_PATH, index=False, encoding="utf-8")
-    print(f"\n✅ Temizlenmiş dataset kaydedildi: {OUTPUT_PATH}")
+    print(f"\n✅ Güncellenmiş dataset kaydedildi: {OUTPUT_PATH}")
     print("=" * 55)
     print("Şimdi modeli yeniden eğit:")
     print("   python src/train_model.py")

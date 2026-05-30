@@ -469,6 +469,54 @@ with tab1:
                     st.info(f"LIME hesaplanamadı: {lime_err}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
+                # ── Transformer LIME Açıklaması ───────────────────────────────
+                st.markdown("<div style='margin-top:20px;'>", unsafe_allow_html=True)
+                st.markdown("### 🤖 Transformer Kararı — LIME Açıklaması")
+                try:
+                    from src.explain_model import get_transformer_lime_explanation
+                    import src.transformer_predictor as _tr_check
+                    if _tr_check.is_available():
+                        with st.spinner("Transformer LIME hesaplanıyor..."):
+                            tr_lime_words = get_transformer_lime_explanation(text, top_n=12)
+                        if tr_lime_words:
+                            tr_sorted = sorted(tr_lime_words, key=lambda x: x[1])
+                            tl_labels = [w for w, _ in tr_sorted]
+                            tl_scores = [s for _, s in tr_sorted]
+                            tl_colors = ["#cba6f7" if s > 0 else "#89dceb" for s in tl_scores]
+                            fig_tr_lime = go.Figure(go.Bar(
+                                x=tl_scores, y=tl_labels, orientation="h",
+                                marker_color=tl_colors,
+                                hovertemplate="%{y}: %{x:.4f}<extra></extra>",
+                            ))
+                            fig_tr_lime.update_layout(
+                                paper_bgcolor="#1e1e2e", plot_bgcolor="#1e1e2e",
+                                font=dict(color="#cdd6f4", family="JetBrains Mono"),
+                                xaxis=dict(title="Transformer LIME Etkisi", gridcolor="#313244", color="#6c7086", zeroline=True, zerolinecolor="#6c7086"),
+                                yaxis=dict(gridcolor="#313244", color="#cdd6f4"),
+                                margin=dict(l=10, r=10, t=10, b=10),
+                                height=340,
+                            )
+                            st.plotly_chart(fig_tr_lime, use_container_width=True)
+                            st.markdown(
+                                "<div style='font-size:12px; color:#6c7086; font-family:JetBrains Mono;'>"
+                                "<span style='color:#cba6f7'>■</span> Phishing yönünde etkili &nbsp;·&nbsp; "
+                                "<span style='color:#89dceb'>■</span> Normal yönünde etkili &nbsp;·&nbsp; "
+                                "DistilBERT modeli üzerinde LIME black-box analizi.</div>",
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.info("Transformer LIME sonuç üretemedi.")
+                    else:
+                        st.markdown(
+                            "<div style='background:#1e1e2e; border-left:3px solid #6c7086; border-radius:6px; "
+                            "padding:8px 14px; font-family:JetBrains Mono; font-size:12px; color:#6c7086;'>"
+                            "⚠️ Transformer modeli eğitilmemiş — <code>python src/train_transformer.py</code></div>",
+                            unsafe_allow_html=True,
+                        )
+                except Exception as tr_lime_err:
+                    st.info(f"Transformer LIME hesaplanamadı: {tr_lime_err}")
+                st.markdown("</div>", unsafe_allow_html=True)
+
                 # ── Aksiyon Önerileri ─────────────────────────────────────────
                 st.markdown("<div style='margin-top:20px;'>", unsafe_allow_html=True)
                 st.markdown("### 📋 Önerilen Aksiyonlar")
@@ -482,6 +530,24 @@ with tab1:
                         f"{action_icon} {action}</div>",
                         unsafe_allow_html=True,
                     )
+                st.markdown("</div>", unsafe_allow_html=True)
+
+                # ── HTML Rapor İndir ──────────────────────────────────────────
+                st.markdown("<div style='margin-top:24px;'>", unsafe_allow_html=True)
+                st.markdown("### 📄 Rapor")
+                try:
+                    from src.report_generator import generate_single_report
+                    _preview = f"{subject} {body}"[:300] if (subject or body) else text[:300]
+                    _html_report = generate_single_report(result, email_preview=_preview)
+                    st.download_button(
+                        label="⬇️ HTML Raporu İndir",
+                        data=_html_report.encode("utf-8"),
+                        file_name="phishing_analiz_raporu.html",
+                        mime="text/html",
+                        use_container_width=True,
+                    )
+                except Exception as rep_err:
+                    st.info(f"Rapor oluşturulamadı: {rep_err}")
                 st.markdown("</div>", unsafe_allow_html=True)
 
             except FileNotFoundError as error:
@@ -794,5 +860,31 @@ with tab3:
             height=400,
         )
 
+        dl_col1, dl_col2 = st.columns(2)
         csv_out = results_df.to_csv(index=False).encode("utf-8")
-        st.download_button("⬇️ CSV İndir", csv_out, "phishing_analiz_sonuclari.csv", "text/csv")
+        with dl_col1:
+            st.download_button("⬇️ CSV İndir", csv_out, "phishing_analiz_sonuclari.csv", "text/csv", use_container_width=True)
+        with dl_col2:
+            try:
+                from src.report_generator import generate_batch_report as _gen_batch
+                import tempfile, os as _os
+                _batch_results = []
+                _batch_previews = []
+                for _, row in results_df.iterrows():
+                    _batch_results.append({
+                        "label": row["Karar"],
+                        "risk_score": row["Risk Skoru"],
+                        "phishing_type": row.get("Phishing Türü", ""),
+                        "url_analysis": {"suspicious_count": row.get("Şüpheli URL", 0), "total_count": row.get("URL Sayısı", 0), "urls": []},
+                        "score_breakdown": {"signals": {}},
+                    })
+                    _batch_previews.append(str(row.get("Önizleme", "")))
+                _tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+                _tmp.close()
+                _gen_batch(_batch_results, _tmp.name, _batch_previews)
+                with open(_tmp.name, "rb") as _f:
+                    _html_batch = _f.read()
+                _os.unlink(_tmp.name)
+                st.download_button("⬇️ HTML Raporu İndir", _html_batch, "phishing_toplu_rapor.html", "text/html", use_container_width=True)
+            except Exception as _batch_err:
+                st.info(f"HTML rapor: {_batch_err}")

@@ -3,7 +3,14 @@ numpy
 scikit-learn
 nltk
 shap
+lime
 streamlit
+plotly
 pickle-mixin
 fastapi
 uvicorn
+datasets
+transformers
+torch
+scipy
+jinja2

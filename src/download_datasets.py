@@ -310,6 +310,22 @@ def load_turkish_email_spam() -> pd.DataFrame:
     )
 
 
+def load_zefang_phishing() -> pd.DataFrame:
+    """zefang-liu/phishing-email-dataset — 18 k phishing/safe e-posta."""
+    rows = []
+    try:
+        d = load_dataset("zefang-liu/phishing-email-dataset", split="train")
+        for item in d:
+            body = str(item.get("Email Text", "")).strip()
+            raw_label = str(item.get("Email Type", "")).strip().lower()
+            lbl = _norm_label(raw_label)
+            if body and lbl is not None and len(body) >= 20:
+                rows.append({"body": body, "label": lbl})
+    except Exception as exc:
+        print(f"  {'zefang-liu/phishing-email-dataset':<40}: hata — {exc}")
+    return _to_df(rows, "zefang-liu/phishing-email-dataset")
+
+
 def load_translated_turkish() -> pd.DataFrame:
     """
     İngilizce phishing/normal e-postalarını Helsinki-NLP/opus-mt-en-tr ile Türkçe'ye çevirir.
@@ -404,6 +420,7 @@ LOADERS = [
     load_sms_spam,
     load_deysi_spam,
     load_kaggle_phishing_zip,
+    load_zefang_phishing,
     load_ealvaradob,
     load_knowledgator,
     load_prasanth,
@@ -416,7 +433,7 @@ LOADERS = [
     load_gchhablani,
     load_chizhikchi,
     load_turkish_email_spam,
-    load_translated_turkish,
+    # load_translated_turkish,  # CPU'da çok yavaş; GPU varsa aktif edin
 ]
 
 
