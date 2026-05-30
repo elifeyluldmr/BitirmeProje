@@ -12,7 +12,10 @@ import pickle
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, classification_report
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    classification_report, roc_auc_score, confusion_matrix,
+)
 from sklearn.model_selection import train_test_split
 
 from src.text_utils import advanced_preprocessing
@@ -86,16 +89,24 @@ def main() -> None:
 
     # Değerlendirme
     y_pred = model.predict(X_test_tfidf)
+    y_prob_test = model.predict_proba(X_test_tfidf)[:, 1]
+
     accuracy  = accuracy_score(y_test, y_pred)
     precision = precision_score(y_test, y_pred, zero_division=0)
     recall    = recall_score(y_test, y_pred, zero_division=0)
     f1        = f1_score(y_test, y_pred, zero_division=0)
+    roc_auc   = roc_auc_score(y_test, y_prob_test)
+
+    tn, fp, fn, tp = confusion_matrix(y_test, y_pred).ravel()
+    fpr = fp / (fp + tn) if (fp + tn) > 0 else 0.0
 
     print("\n📊 Model Performansı:")
     print(f"   Accuracy : {accuracy:.4f}")
     print(f"   Precision: {precision:.4f}")
     print(f"   Recall   : {recall:.4f}")
     print(f"   F1 Score : {f1:.4f}")
+    print(f"   ROC AUC  : {roc_auc:.4f}")
+    print(f"   FPR      : {fpr:.4f}")
 
     # Raporu kaydet
     report = classification_report(y_test, y_pred, target_names=["Normal", "Phishing"])
@@ -103,7 +114,9 @@ def main() -> None:
         f"Accuracy : {accuracy:.4f}\n"
         f"Precision: {precision:.4f}\n"
         f"Recall   : {recall:.4f}\n"
-        f"F1 Score : {f1:.4f}\n\n"
+        f"F1 Score : {f1:.4f}\n"
+        f"ROC AUC  : {roc_auc:.4f}\n"
+        f"FPR      : {fpr:.4f}\n\n"
         f"{report}",
         encoding="utf-8",
     )

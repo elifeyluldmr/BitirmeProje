@@ -1,3 +1,6 @@
+import sys
+sys.stdout.reconfigure(encoding="utf-8")
+
 from fastapi import FastAPI
 from pydantic import BaseModel
 from starlette.responses import RedirectResponse

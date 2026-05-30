@@ -2,6 +2,7 @@
 DistilBERT inference modülü — train_transformer.py ile eğitilmiş modeli kullanır.
 models/transformer/config.json yoksa tüm fonksiyonlar sessizce None/False döndürür.
 """
+from __future__ import annotations
 
 from pathlib import Path
 

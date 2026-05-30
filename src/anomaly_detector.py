@@ -3,6 +3,7 @@ Anomali Tespiti — Isolation Forest
 Normal e-postalardan öğrenir; kalıptan sapan e-postaları şüpheli işaretler.
 Model train_model.py çalıştırılınca otomatik eğitilir ve kaydedilir.
 """
+from __future__ import annotations
 
 import re
 import pickle
