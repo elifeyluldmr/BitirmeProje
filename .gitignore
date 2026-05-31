@@ -10,3 +10,7 @@ build/
 .venv
 venv/
 *.log
+
+# Büyük dosyalar (GitHub 100MB limitini aşıyor)
+data/emails_clean.csv
+models/transformer/model.safetensors
