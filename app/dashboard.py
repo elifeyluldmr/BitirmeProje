@@ -573,10 +573,14 @@ with tab2:
         with open(results_path, "rb") as f:
             r = pickle.load(f)
 
-        return r["y_test"], r["y_pred"], r["y_prob"], r.get("dataset_size", 0), r.get("test_size", 0)
+        return (
+            r["y_test"], r["y_pred"], r["y_prob"],
+            r.get("dataset_size", 0), r.get("test_size", 0),
+            r.get("roc_auc", None), r.get("cv_metrics", {}),
+        )
 
     try:
-        y_test, y_pred, y_prob, dataset_size, test_size = load_performance_data()
+        y_test, y_pred, y_prob, dataset_size, test_size, stored_roc_auc, cv_metrics = load_performance_data()
 
         cm = confusion_matrix(y_test, y_pred, labels=[0, 1])
         tn, fp, fn, tp = cm.ravel()
@@ -588,14 +592,17 @@ with tab2:
 
         # ── Metrik kartları ───────────────────────────────────────────────────
         fpr_rate = fp / (fp + tn) if (fp + tn) > 0 else 0.0
+        fpr_arr, tpr_arr, _ = roc_curve(y_test, y_prob)
+        roc_auc_val = auc(fpr_arr, tpr_arr)
 
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4, c5, c6 = st.columns(6)
         for col, lbl, value, highlight in [
-            (c1, "Accuracy",           accuracy,  False),
-            (c2, "Precision",          precision, False),
-            (c3, "Recall",             recall,    False),
-            (c4, "F1 Score",           f1,        False),
-            (c5, "Yanlış Alarm Oranı", fpr_rate,  True),
+            (c1, "Accuracy",           accuracy,     False),
+            (c2, "Precision",          precision,    False),
+            (c3, "Recall",             recall,       False),
+            (c4, "F1 Score",           f1,           False),
+            (c5, "ROC AUC",            roc_auc_val,  False),
+            (c6, "Yanlış Alarm Oranı", fpr_rate,     True),
         ]:
             with col:
                 val_color = "#f38ba8" if (highlight and value > 0.05) else "#89b4fa"
@@ -651,14 +658,11 @@ with tab2:
 
         with col_roc:
             st.markdown("### 📈 ROC Eğrisi")
-            fpr, tpr, _ = roc_curve(y_test, y_prob)
-            roc_auc = auc(fpr, tpr)
-
             fig_roc = go.Figure()
             fig_roc.add_trace(go.Scatter(
-                x=fpr, y=tpr,
+                x=fpr_arr, y=tpr_arr,
                 mode="lines",
-                name=f"ROC (AUC = {roc_auc:.3f})",
+                name=f"ROC (AUC = {roc_auc_val:.3f})",
                 line=dict(color="#89b4fa", width=2),
                 fill="tozeroy",
                 fillcolor="rgba(137,180,250,0.1)",
@@ -682,7 +686,7 @@ with tab2:
             st.plotly_chart(fig_roc, use_container_width=True)
             st.markdown(f"""
             <div style="font-family: JetBrains Mono; font-size:13px; color:#6c7086; margin-top:8px;">
-                AUC = <span style="color:#89b4fa">{roc_auc:.4f}</span> &nbsp;·&nbsp;
+                AUC = <span style="color:#89b4fa">{roc_auc_val:.4f}</span> &nbsp;·&nbsp;
                 1.0'e ne kadar yakınsa model o kadar iyi.
             </div>
             """, unsafe_allow_html=True)
@@ -738,6 +742,62 @@ with tab2:
                         <div class="perf-label">P@{k}</div>
                     </div>
                     """, unsafe_allow_html=True)
+
+        # ── 5-Fold Cross-Validation ───────────────────────────────────────────
+        if cv_metrics:
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("### 🔁 5-Fold Cross-Validation")
+            st.markdown(
+                "<div style='font-family:JetBrains Mono; font-size:12px; color:#6c7086; margin-bottom:12px;'>"
+                "Modelin genelleme gücü — farklı veri bölümlerinde tutarlı performans</div>",
+                unsafe_allow_html=True,
+            )
+            cv_cols = st.columns(3)
+            for col, lbl, mean_key, std_key in [
+                (cv_cols[0], "CV Accuracy",  "accuracy_mean", "accuracy_std"),
+                (cv_cols[1], "CV F1 Score",  "f1_mean",       "f1_std"),
+                (cv_cols[2], "CV ROC AUC",   "roc_auc_mean",  "roc_auc_std"),
+            ]:
+                mean = cv_metrics.get(mean_key, 0)
+                std  = cv_metrics.get(std_key, 0)
+                with col:
+                    st.markdown(f"""
+                    <div class="perf-card">
+                        <div class="perf-value" style="color:#a6e3a1">%{mean*100:.2f}</div>
+                        <div class="perf-label">{lbl}</div>
+                        <div style="font-size:11px; color:#6c7086; margin-top:4px;">± %{std*100:.2f}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            # Fold bazlı F1 grafiği
+            fold_f1 = cv_metrics.get("fold_f1", [])
+            fold_roc = cv_metrics.get("fold_roc_auc", [])
+            if fold_f1:
+                fig_cv = go.Figure()
+                fig_cv.add_trace(go.Bar(
+                    x=[f"Fold {i+1}" for i in range(len(fold_f1))],
+                    y=[v * 100 for v in fold_f1],
+                    name="F1 Score",
+                    marker_color="#a6e3a1",
+                ))
+                if fold_roc:
+                    fig_cv.add_trace(go.Bar(
+                        x=[f"Fold {i+1}" for i in range(len(fold_roc))],
+                        y=[v * 100 for v in fold_roc],
+                        name="ROC AUC",
+                        marker_color="#89b4fa",
+                    ))
+                fig_cv.update_layout(
+                    barmode="group",
+                    paper_bgcolor="#1e1e2e", plot_bgcolor="#1e1e2e",
+                    font=dict(color="#cdd6f4", family="JetBrains Mono"),
+                    xaxis=dict(gridcolor="#313244", color="#6c7086"),
+                    yaxis=dict(title="%", gridcolor="#313244", color="#6c7086", range=[95, 101]),
+                    legend=dict(bgcolor="#1e1e2e", bordercolor="#313244"),
+                    margin=dict(l=10, r=10, t=10, b=10),
+                    height=250,
+                )
+                st.plotly_chart(fig_cv, use_container_width=True)
 
         # ── Transformer Model Karşılaştırması ─────────────────────────────────
         transformer_path = Path(__file__).resolve().parents[1] / "models" / "transformer_test_results.pkl"

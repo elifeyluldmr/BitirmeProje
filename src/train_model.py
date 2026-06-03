@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import pickle
+import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
@@ -16,7 +17,8 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     classification_report, roc_auc_score, confusion_matrix,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, StratifiedKFold, cross_validate
+from sklearn.pipeline import Pipeline
 
 from src.text_utils import advanced_preprocessing
 from src.predict import PHISHING_THRESHOLD
@@ -87,6 +89,38 @@ def main() -> None:
     )
     model.fit(X_train_tfidf, y_train)
 
+    # 5-Fold Cross-Validation (pipeline üzerinde)
+    print("⚙️  5-Fold Cross-Validation çalışıyor...")
+    cv_pipeline = Pipeline([
+        ("tfidf", TfidfVectorizer(ngram_range=(1, 2), max_features=30_000,
+                                  min_df=2, sublinear_tf=True)),
+        ("clf",   LogisticRegression(max_iter=500, solver="liblinear",
+                                     class_weight="balanced", C=1.0)),
+    ])
+    cv_sample_size = min(30_000, len(X))
+    cv_idx = np.random.RandomState(42).choice(len(X), cv_sample_size, replace=False)
+    X_cv = X.iloc[cv_idx]
+    y_cv = y.iloc[cv_idx]
+    cv_results = cross_validate(
+        cv_pipeline, X_cv, y_cv,
+        cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
+        scoring=["accuracy", "f1", "roc_auc"],
+        n_jobs=-1,
+    )
+    cv_metrics = {
+        "accuracy_mean":  float(np.mean(cv_results["test_accuracy"])),
+        "accuracy_std":   float(np.std(cv_results["test_accuracy"])),
+        "f1_mean":        float(np.mean(cv_results["test_f1"])),
+        "f1_std":         float(np.std(cv_results["test_f1"])),
+        "roc_auc_mean":   float(np.mean(cv_results["test_roc_auc"])),
+        "roc_auc_std":    float(np.std(cv_results["test_roc_auc"])),
+        "fold_f1":        cv_results["test_f1"].tolist(),
+        "fold_roc_auc":   cv_results["test_roc_auc"].tolist(),
+    }
+    print(f"   CV Accuracy : {cv_metrics['accuracy_mean']:.4f} ± {cv_metrics['accuracy_std']:.4f}")
+    print(f"   CV F1 Score : {cv_metrics['f1_mean']:.4f} ± {cv_metrics['f1_std']:.4f}")
+    print(f"   CV ROC AUC  : {cv_metrics['roc_auc_mean']:.4f} ± {cv_metrics['roc_auc_std']:.4f}")
+
     # Değerlendirme
     y_pred = model.predict(X_test_tfidf)
     y_prob_test = model.predict_proba(X_test_tfidf)[:, 1]
@@ -117,6 +151,10 @@ def main() -> None:
         f"F1 Score : {f1:.4f}\n"
         f"ROC AUC  : {roc_auc:.4f}\n"
         f"FPR      : {fpr:.4f}\n\n"
+        f"--- 5-Fold Cross-Validation ({cv_sample_size:,} örnek) ---\n"
+        f"CV Accuracy : {cv_metrics['accuracy_mean']:.4f} ± {cv_metrics['accuracy_std']:.4f}\n"
+        f"CV F1 Score : {cv_metrics['f1_mean']:.4f} ± {cv_metrics['f1_std']:.4f}\n"
+        f"CV ROC AUC  : {cv_metrics['roc_auc_mean']:.4f} ± {cv_metrics['roc_auc_std']:.4f}\n\n"
         f"{report}",
         encoding="utf-8",
     )
@@ -135,21 +173,18 @@ def main() -> None:
         pickle.dump(anomaly_model, f)
     print(f"✅ Anomali modeli kaydedildi: {anomaly_model_path}")
 
-    # Dashboard için tam dataset üzerinde tahmin yap
-    print("⚙️  Tam dataset üzerinde tahmin yapılıyor...")
-    X_all_tfidf = vectorizer.transform(X)
-    y_prob_all = model.predict_proba(X_all_tfidf)[:, 1]
-    y_pred_all = (y_prob_all * 100 >= PHISHING_THRESHOLD).astype(int)
-
+    # Dashboard için SADECE gerçek test seti sonuçlarını kaydet
     test_results_path = model_path.parent / "test_results.pkl"
     with open(test_results_path, "wb") as f:
         pickle.dump({
-            "y_test": y.values,
-            "y_pred": y_pred_all,
-            "y_prob": y_prob_all,
-            "dataset_size": len(df),
-            "train_size": len(X_train),
-            "test_size": len(df),
+            "y_test":          y_test.values,
+            "y_pred":          y_pred,
+            "y_prob":          y_prob_test,
+            "dataset_size":    len(df),
+            "train_size":      len(X_train),
+            "test_size":       len(X_test),
+            "roc_auc":         roc_auc,
+            "cv_metrics":      cv_metrics,
         }, f)
     print(f"✅ Dashboard sonuçları kaydedildi: {test_results_path}")
 
