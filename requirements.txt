@@ -10,6 +10,7 @@ pickle-mixin
 fastapi
 uvicorn
 datasets
+huggingface_hub
 transformers
 torch
 scipy

@@ -636,18 +636,6 @@ def load_spamassassin_direct() -> pd.DataFrame:
     return _to_df(rows, "SpamAssassin (direct)")
 
 
-# ── 8. Türkçe spam datasetleri ───────────────────────────────────────────────
-
-def load_turkish_email_spam() -> pd.DataFrame:
-    """anilguven/turkish_spam_email — 1 k Türkçe e-posta spam/ham."""
-    return _load_hf_generic(
-        "anilguven/turkish_spam_email",
-        splits=("train", "test"),
-        text_fields=("text", "body"),
-        label_fields=("labels", "label"),
-    )
-
-
 def load_zefang_phishing() -> pd.DataFrame:
     """zefang-liu/phishing-email-dataset — 18 k phishing/safe e-posta."""
     rows = []
@@ -662,93 +650,6 @@ def load_zefang_phishing() -> pd.DataFrame:
     except Exception as exc:
         print(f"  {'zefang-liu/phishing-email-dataset':<40}: hata — {exc}")
     return _to_df(rows, "zefang-liu/phishing-email-dataset")
-
-
-def load_translated_turkish() -> pd.DataFrame:
-    """
-    İngilizce phishing/normal e-postalarını Helsinki-NLP/opus-mt-en-tr ile Türkçe'ye çevirir.
-    İlk çalıştırmada model indirilir (~300 MB) ve sonuç data/turkish_translated.csv'ye cache'lenir.
-    """
-    cache_path = Path(__file__).resolve().parents[1] / "data" / "turkish_translated.csv"
-
-    if cache_path.exists() and cache_path.stat().st_size > 10_000:
-        df = pd.read_csv(cache_path)
-        df = df[df["body"].str.len() >= 20].dropna(subset=["body", "label"])
-        return _to_df(df[["body", "label"]].to_dict("records"), "Türkçe çeviri (cache)")
-
-    try:
-        from transformers import MarianMTModel, MarianTokenizer
-        import torch
-    except ImportError:
-        print(f"  {'Türkçe çeviri':<40}: 'transformers' kurulu değil, atlanıyor.")
-        return pd.DataFrame(columns=["body", "label"])
-
-    model_candidates = [
-        "Helsinki-NLP/opus-mt-tc-big-en-tr",
-        "Helsinki-NLP/opus-mt-en-tr",
-    ]
-    tokenizer, model = None, None
-    for model_id in model_candidates:
-        try:
-            print(f"  {'Türkçe çeviri':<40}: {model_id} indiriliyor...")
-            tokenizer = MarianTokenizer.from_pretrained(model_id)
-            model     = MarianMTModel.from_pretrained(model_id)
-            break
-        except Exception:
-            continue
-    if model is None:
-        print(f"  {'Türkçe çeviri':<40}: hiçbir çeviri modeli yüklenemedi, atlanıyor.")
-        return pd.DataFrame(columns=["body", "label"])
-
-    model.eval()
-
-    def translate_batch(texts: list[str]) -> list[str]:
-        inputs = tokenizer(texts, return_tensors="pt", padding=True,
-                           truncation=True, max_length=256)
-        with torch.no_grad():
-            out = model.generate(**inputs)
-        return [tokenizer.decode(t, skip_special_tokens=True) for t in out]
-
-    # Kaynak: SetFit/enron_spam (çalıştığı bilinen dataset)
-    try:
-        src = load_dataset("SetFit/enron_spam", split="train")
-    except Exception as exc:
-        print(f"  {'Türkçe çeviri':<40}: kaynak dataset yüklenemedi — {exc}")
-        return pd.DataFrame(columns=["body", "label"])
-
-    sample_row = src[0]
-    body_key  = next((k for k in ("text", "message", "body", "email") if k in sample_row), None)
-    label_key = next((k for k in ("label", "spam", "type")            if k in sample_row), None)
-    if not body_key or not label_key:
-        print(f"  {'Türkçe çeviri':<40}: kolon bulunamadı.")
-        return pd.DataFrame(columns=["body", "label"])
-
-    phishing = [(str(r[body_key])[:300], 1) for r in src
-                if _norm_label(r[label_key]) == 1 and len(str(r[body_key]).strip()) >= 30][:1500]
-    normal   = [(str(r[body_key])[:300], 0) for r in src
-                if _norm_label(r[label_key]) == 0 and len(str(r[body_key]).strip()) >= 30][:1500]
-    all_samples = phishing + normal
-    print(f"  {'Türkçe çeviri':<40}: {len(all_samples)} e-posta çevriliyor...")
-
-    rows, batch_size = [], 8
-    for i in range(0, len(all_samples), batch_size):
-        batch  = all_samples[i : i + batch_size]
-        texts  = [t for t, _ in batch]
-        labels = [l for _, l in batch]
-        try:
-            translated = translate_batch(texts)
-            for body, lbl in zip(translated, labels):
-                if len(body.strip()) >= 20:
-                    rows.append({"body": body.strip(), "label": lbl})
-        except Exception:
-            continue
-
-    if not rows:
-        return pd.DataFrame(columns=["body", "label"])
-
-    df = pd.DataFrame(rows)
-    df.to_csv(cache_path, index=False, encoding="utf-8")
-    return _to_df(rows, "Helsinki-NLP EN→TR (Türkçe çeviri)")
 
 
 # ── Ana akış ──────────────────────────────────────────────────────────────────

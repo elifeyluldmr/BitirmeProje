@@ -60,7 +60,7 @@ def merge_extra_csvs(base_df: pd.DataFrame) -> pd.DataFrame:
     Ayrıca 'text'+'label' veya 'message'+'label' kolonları da kabul edilir.
     """
     data_dir = Path(DATA_PATH).parent
-    skip = {"emails_clean.csv", "emails.csv", "emails.sample.csv", "turkish_translated.csv"}
+    skip = {"emails_clean.csv", "emails.csv", "emails.sample.csv"}
     extra_files = [
         p for p in data_dir.glob("*.csv")
         if p.name not in skip and p.stat().st_size > 100

@@ -13,6 +13,12 @@ try:
     from src.anomaly_detector import get_anomaly_score
     from src.header_utils import analyze_headers
     import src.transformer_predictor as _transformer
+    from src.config import (
+        PHISHING_THRESHOLD,
+        W_MODEL as _W_MODEL, W_KEYWORD as _W_KEYWORD,
+        W_URL as _W_URL, W_HEADER as _W_HEADER, W_ANOMALY as _W_ANOMALY,
+        TRANSFORMER_W as _TRANSFORMER_W, LR_W as _LR_W,
+    )
 except ModuleNotFoundError:
     from text_utils import (
         advanced_preprocessing,
@@ -24,46 +30,32 @@ except ModuleNotFoundError:
     from anomaly_detector import get_anomaly_score
     from header_utils import analyze_headers
     import transformer_predictor as _transformer
+    from config import (
+        PHISHING_THRESHOLD,
+        W_MODEL as _W_MODEL, W_KEYWORD as _W_KEYWORD,
+        W_URL as _W_URL, W_HEADER as _W_HEADER, W_ANOMALY as _W_ANOMALY,
+        TRANSFORMER_W as _TRANSFORMER_W, LR_W as _LR_W,
+    )
 
-# Phishing kararı için minimum risk skoru eşiği.
-PHISHING_THRESHOLD = 55.0
-
-# ── Katman ağırlıkları ────────────────────────────────────────────────────────
-# Header ve anomali yoksa bu ağırlıklar 0'a çekilerek kalan ağırlıklar
-# normalize edilir — böylece risk skoru her zaman 0-100 aralığında kalır.
-_W_MODEL   = 0.40   # TF-IDF LR + transformer blend
-_W_KEYWORD = 0.20   # Anahtar kelime eşleşmesi
-_W_URL     = 0.20   # URL risk analizi
-_W_HEADER  = 0.12   # Başlık analizi (From/Reply-To)
-_W_ANOMALY = 0.08   # Anomali tespiti (Isolation Forest)
-
-# Transformer blend — model yüklüyse LR olasılığıyla bu oranlarda karıştırılır.
-_TRANSFORMER_W = 0.60
-_LR_W          = 0.40
-
+# Modeli her tahmin için diskten okumak yavaş, burada tutuyoruz
 _model_cache: dict = {}
 
-# Kural tabanlı yedek — ML modeli yüklü değilse kullanılır
+# ML modeli henüz eğitilmemişse anahtar kelimelerle türü tahmin ediyoruz
 _PHISHING_TYPE_KEYWORDS: dict[str, list[str]] = {
     "Finansal Dolandırıcılık": [
         "bank", "payment", "invoice", "tax", "refund", "credit", "wire",
-        "banka", "ödeme", "fatura", "vergi", "iade", "kredi", "transfer", "borç",
     ],
     "Kimlik Hırsızlığı": [
         "login", "password", "verify", "account", "username", "credential",
-        "giriş", "şifre", "doğrula", "hesap", "parola", "kimlik",
     ],
     "Kötü Amaçlı Link": [
         "click", "link", "download", "install", "attachment",
-        "tıkla", "bağlantı", "indir", "yükle", "ek",
     ],
     "Sahte Ödül/Çekiliş": [
         "winner", "prize", "congratulations", "selected", "reward", "lottery",
-        "kazandınız", "ödül", "tebrikler", "seçildiniz", "çekiliş", "hediye",
     ],
     "Sahte Kargo/Teslimat": [
         "package", "shipment", "delivery", "courier", "tracking",
-        "kargo", "paket", "teslim", "teslimat", "adres",
     ],
     "Marka Taklidi": [
         "paypal", "amazon", "apple", "microsoft", "google", "netflix",
@@ -71,38 +63,42 @@ _PHISHING_TYPE_KEYWORDS: dict[str, list[str]] = {
     ],
 }
 
+# Tür sınıflandırıcısı için de ayrı bir cache tutuyoruz
 _type_classifier_cache: dict = {}
 
 
 def _load_type_classifier() -> dict | None:
-    """ML tür sınıflandırıcısını önbellekli yükler; yoksa None döner."""
+    # Tür sınıflandırıcısı dosyası yoksa kural tabanlı sisteme fallback yapıyoruz
     project_root = Path(__file__).resolve().parents[1]
-    model_path = project_root / "models" / "type_classifier.pkl"
+    model_path   = project_root / "models" / "type_classifier.pkl"
     if not model_path.exists():
         return None
+    # Dosya değişmediyse cache yeterli
     mtime = model_path.stat().st_mtime
     if _type_classifier_cache.get("mtime") == mtime:
         return _type_classifier_cache.get("data")
     with open(model_path, "rb") as f:
         data = pickle.load(f)
-    _type_classifier_cache["data"] = data
+    _type_classifier_cache["data"]  = data
     _type_classifier_cache["mtime"] = mtime
     return data
 
 
 def is_phishing_label(label: object) -> bool:
+    # Farklı dataset formatlarındaki etiketleri tek bir bool'a indiriyoruz
     return str(label).strip().lower() in {"1", "yes", "true", "phishing", "spam"}
 
 
 def load_model_objects() -> tuple[object, object]:
-    """Kaydedilen TF-IDF + LR modelini önbellekli yükler."""
+    # Dosya değişmedikçe cache'deki modeli kullanıyoruz, gereksiz disk okuma yok
     project_root = Path(__file__).resolve().parents[1]
-    model_path = project_root / "models" / "phishing_model.pkl"
+    model_path   = project_root / "models" / "phishing_model.pkl"
 
     mtime = model_path.stat().st_mtime if model_path.exists() else 0
     if "model" in _model_cache and _model_cache.get("mtime") == mtime:
         return _model_cache["model"], _model_cache["vectorizer"]
 
+    # Model dosyası yoksa anlaşılır bir hata ver
     if not model_path.exists():
         raise FileNotFoundError(
             f"Model bulunamadi: {model_path}. Once src/train_model.py dosyasini calistirin."
@@ -118,42 +114,41 @@ def load_model_objects() -> tuple[object, object]:
 
 
 def classify_phishing_type(text: str) -> str:
-    """Kural tabanlı skorlamayı önce dener; eşleşme yoksa ML modeline başvurur.
-
-    Kural tabanlı yöntem Türkçe anahtar kelimeler için daha güvenilirdir.
-    ML model yalnızca hiçbir kural eşleşmediğinde (Genel Phishing) devreye girer.
-    """
-    text_lower = text.lower()
+    # Önce anahtar kelime kurallarına bakıyoruz, bunlar daha hızlı
+    text_lower   = text.lower()
     type_scores: dict[str, int] = {}
     for ptype, keywords in _PHISHING_TYPE_KEYWORDS.items():
         score = sum(1 for kw in keywords if kw in text_lower)
         if score > 0:
             type_scores[ptype] = score
 
+    # En çok eşleşen türü dön, eşleşme yoksa ML modeline sor
     if type_scores:
         return max(type_scores, key=lambda k: type_scores[k])
 
-    # Kural eşleşmesi yoksa ML modeline bak
     clf_data = _load_type_classifier()
     if clf_data is not None:
         try:
-            clean = advanced_preprocessing(text)
-            vec = clf_data["vectorizer"].transform([clean])
+            clean    = advanced_preprocessing(text)
+            vec      = clf_data["vectorizer"].transform([clean])
             pred_int = int(clf_data["model"].predict(vec)[0])
             return clf_data["int_to_type"].get(pred_int, "Genel Phishing")
         except Exception:
             pass
 
+    # Hiçbir şey eşleşmezse genel kategori
     return "Genel Phishing"
 
 
 def get_action_recommendations(label: str, phishing_type: str, risk_score: float) -> list[str]:
+    # Güvenli e-postalar için de risk ortadaysa uyarı veriyoruz
     if label != "YES":
         actions = ["E-posta güvenli görünüyor."]
         if risk_score > 40:
             actions.append("Risk skoru orta seviyede — bağlantılardan kaçınmanız önerilir.")
         return actions
 
+    # Phishing ise her türe özel aksiyon listesi dönüyoruz
     base = [
         "Bu e-postayı açmayın, linklere tıklamayın.",
         "E-postayı spam/phishing olarak işaretleyip silin.",
@@ -189,14 +184,11 @@ def get_action_recommendations(label: str, phishing_type: str, risk_score: float
 
 
 def _blend_model_probability(text: str, lr_prob: float) -> tuple[float, float | None]:
-    """LR olasılığını transformer ile blend eder.
-
-    Dönüş: (blended_prob, transformer_prob_or_None)
-    Transformer yoksa LR olasılığı olduğu gibi döner.
-    """
+    # Transformer yoksa LR skoru olduğu gibi kullanılıyor, hata fırlatılmıyor
     tr_prob = _transformer.predict(text)
     if tr_prob is None:
         return lr_prob, None
+    # %60 transformer + %40 LR karması en iyi doğruluğu verdi
     blended = _TRANSFORMER_W * tr_prob + _LR_W * lr_prob
     return blended, tr_prob
 
@@ -210,15 +202,12 @@ def _compute_risk_score(
     header_provided: bool,
     anomaly_available: bool,
 ) -> tuple[float, dict]:
-    """5 sinyali normalize ağırlıklarla birleştirir.
-
-    Eksik sinyallerin ağırlığı diğer sinyallere orantılı dağıtılır.
-    Dönüş: (risk_score 0-100, breakdown dict)
-    """
-    w_hdr = _W_HEADER if header_provided else 0.0
+    # Header veya anomali yoksa ağırlıklarını diğer sinyallere yayıyoruz
+    w_hdr = _W_HEADER if header_provided  else 0.0
     w_ano = _W_ANOMALY if anomaly_available else 0.0
     total = _W_MODEL + _W_KEYWORD + _W_URL + w_hdr + w_ano
 
+    # Her sinyalin nihai skora katkısını hesaplıyoruz
     contributions = {
         "model":   _W_MODEL   * model_prob    / total,
         "keyword": _W_KEYWORD * keyword_score / total,
@@ -227,36 +216,38 @@ def _compute_risk_score(
         "anomaly": w_ano      * anomaly_score / total,
     }
 
+    # Katkıların toplamı risk skoru, 100'den büyük olamaz
     risk_score = min(100.0, sum(contributions.values()))
 
+    # Dashboard'da her sinyalin detayını göstermek için breakdown sözlüğü
     breakdown = {
         "signals": {
-            "model":   {
-                "score": round(model_prob, 1),
+            "model": {
+                "score":        round(model_prob, 1),
                 "contribution": round(contributions["model"], 1),
-                "weight_pct": round(_W_MODEL / total * 100, 1),
+                "weight_pct":   round(_W_MODEL / total * 100, 1),
             },
             "keyword": {
-                "score": round(keyword_score, 1),
+                "score":        round(keyword_score, 1),
                 "contribution": round(contributions["keyword"], 1),
-                "weight_pct": round(_W_KEYWORD / total * 100, 1),
+                "weight_pct":   round(_W_KEYWORD / total * 100, 1),
             },
             "url": {
-                "score": round(url_score, 1),
+                "score":        round(url_score, 1),
                 "contribution": round(contributions["url"], 1),
-                "weight_pct": round(_W_URL / total * 100, 1),
+                "weight_pct":   round(_W_URL / total * 100, 1),
             },
             "header": {
-                "score": round(header_score, 1),
+                "score":        round(header_score, 1),
                 "contribution": round(contributions["header"], 1),
-                "weight_pct": round(w_hdr / total * 100, 1),
-                "available": header_provided,
+                "weight_pct":   round(w_hdr / total * 100, 1),
+                "available":    header_provided,
             },
             "anomaly": {
-                "score": round(anomaly_score, 1),
+                "score":        round(anomaly_score, 1),
                 "contribution": round(contributions["anomaly"], 1),
-                "weight_pct": round(w_ano / total * 100, 1),
-                "available": anomaly_available,
+                "weight_pct":   round(w_ano / total * 100, 1),
+                "available":    anomaly_available,
             },
         },
     }
@@ -270,40 +261,39 @@ def predict_details(
     reply_to: str  = "",
     subject: str   = "",
 ) -> dict:
-    """Metni 5 katmanlı hibrit modelle analiz eder ve detaylı sonuç döndürür."""
+    # TF-IDF vektörize edip LR olasılığını alıyoruz
     model, vectorizer = load_model_objects()
-
-    clean_text = advanced_preprocessing(text)
+    clean_text  = advanced_preprocessing(text)
     text_vector = vectorizer.transform([clean_text])
 
     if hasattr(model, "predict_proba"):
-        probs = model.predict_proba(text_vector)[0]
+        probs          = model.predict_proba(text_vector)[0]
         lr_probability = float(probs[1] * 100)
     else:
-        raw = model.predict(text_vector)[0]
+        raw            = model.predict(text_vector)[0]
         lr_probability = 100.0 if is_phishing_label(raw) else 0.0
 
-    # Transformer blend
+    # LR ve transformer blend ediliyor, transformer yoksa sadece LR kullanılıyor
     model_probability, transformer_probability = _blend_model_probability(text, lr_probability)
 
-    # Keyword
+    # Şüpheli kelime analizi
     matched_keywords = find_suspicious_keywords(text)
     keyword_score    = get_keyword_score(matched_keywords)
 
-    # URL
+    # URL analizi, metindeki tüm linkler inceleniyor
     url_analysis = analyze_urls_in_text(text)
     url_score    = float(url_analysis["max_score"])
 
-    # Anomali
+    # Anomali modeli varsa çalıştır, yoksa skor 0 kalıyor
     anomaly       = get_anomaly_score(text)
     anomaly_score = float(anomaly["score"])
 
-    # Header
+    # Header alanları doldurulduysa başlık analizini de dahil ediyoruz
     header_provided = bool(from_addr.strip() or reply_to.strip())
     header_analysis = analyze_headers(from_addr, reply_to, subject)
     header_score    = float(header_analysis["score"])
 
-    # 5 katmanlı risk skoru
+    # Beş katmanın ağırlıklı toplamından risk skorunu üretiyoruz
     risk_score, breakdown = _compute_risk_score(
         model_probability,
         keyword_score,
@@ -314,15 +304,19 @@ def predict_details(
         anomaly["available"],
     )
 
+    # Transformer bilgilerini breakdown'a ekliyoruz, dashboard bunu gösteriyor
     breakdown["transformer_probability"] = (
         round(transformer_probability, 1) if transformer_probability is not None else None
     )
-    breakdown["lr_probability"] = round(lr_probability, 1)
-    breakdown["transformer_used"] = transformer_probability is not None
+    breakdown["lr_probability"]    = round(lr_probability, 1)
+    breakdown["transformer_used"]  = transformer_probability is not None
 
+    # Eşik değeri 55, bunun üzeri phishing sayılıyor
     phishing_result = "YES" if risk_score >= PHISHING_THRESHOLD else "NO"
-    raw_distance    = abs(risk_score - PHISHING_THRESHOLD)
-    confidence      = min(100.0, raw_distance * (100.0 / PHISHING_THRESHOLD))
+
+    # Eşiğe uzaklık güven skorunu veriyor, ortadaysa model kararsız demek
+    raw_distance = abs(risk_score - PHISHING_THRESHOLD)
+    confidence   = min(100.0, raw_distance * (100.0 / PHISHING_THRESHOLD))
 
     phishing_type = classify_phishing_type(text) if phishing_result == "YES" else ""
     actions       = get_action_recommendations(phishing_result, phishing_type, risk_score)
@@ -351,20 +345,17 @@ def predict_details_with_headers(
     reply_to: str  = "",
     subject: str   = "",
 ) -> dict:
-    """predict_details ile aynıdır; geriye dönük uyumluluk için korunmuştur."""
+    # predict_details ile tamamen aynı, eski çağrılar için burada tutuyoruz
     return predict_details(text, from_addr, reply_to, subject)
 
 
-def predict_with_confidence(text: str) -> tuple[str, float]:
-    result = predict_details(text)
-    return result["label"], float(result["confidence"])
-
-
 def predict_email(text: str) -> str:
+    # Sadece YES/NO isteyenler için kısa yol
     return str(predict_details(text)["label"])
 
 
 def main() -> None:
+    # Hızlı el testi, biri phishing biri normal e-posta
     test_email_1 = {
         "subject": "Verify Your Bank Account",
         "body": "Your account has been suspended. Click here to verify immediately. http://login.fake-bank.tk/verify",
@@ -388,7 +379,7 @@ def main() -> None:
         print("  Sinyal Dağılımı:")
         for name, sig in bd["signals"].items():
             avail = sig.get("available", True)
-            tag = "" if avail else " (mevcut değil)"
+            tag   = "" if avail else " (mevcut değil)"
             print(f"    {name:8}: {sig['score']:5.1f}/100  →  +{sig['contribution']:.1f} pt  (ağırlık %{sig['weight_pct']:.0f}){tag}")
 
 
